@@ -1,0 +1,223 @@
+{
+  "entities": {
+    "PublicAppConfig": {
+      "title": "PublicAppConfig",
+      "description": "Public non-PII application branding, module visibility, and package pricing tiers.",
+      "type": "object",
+      "properties": {
+        "appTitle": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "appSubtitle": { "type": "string", "maxLength": 250 },
+        "customWinnerTaskLine1": { "type": "string", "maxLength": 300 },
+        "customWinnerTaskLine2": { "type": "string", "maxLength": 300 },
+        "customWinnerTaskBingo": { "type": "string", "maxLength": 300 },
+        "categoryOrder": { "type": "array", "description": "Ordered list of bingo category keys" },
+        "visibleModules": { "type": "object", "description": "Boolean visibility flags for UI modules" },
+        "startPanelDefaults": { "type": "object", "description": "Owner-configured default setup for the start/player panel" },
+        "isMonetizationActive": { "type": "boolean" },
+        "commissionPercent": { "type": "number" },
+        "fixedFeePerPlayer": { "type": "number" },
+        "eventPassPrice": { "type": "number" },
+        "proBigScreenPrice": { "type": "number" },
+        "eventExtensionPrice": { "type": "number" },
+        "price20MinTrial": { "type": "number" },
+        "price1Hour": { "type": "number" },
+        "price2Hours": { "type": "number" },
+        "price3Hours": { "type": "number" },
+        "price4Hours": { "type": "number" },
+        "priceFullDay": { "type": "number" },
+        "updatedByUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "appTitle",
+        "appSubtitle",
+        "customWinnerTaskLine1",
+        "customWinnerTaskLine2",
+        "customWinnerTaskBingo",
+        "categoryOrder",
+        "visibleModules",
+        "isMonetizationActive",
+        "commissionPercent",
+        "fixedFeePerPlayer",
+        "eventPassPrice",
+        "proBigScreenPrice",
+        "eventExtensionPrice",
+        "price20MinTrial",
+        "price1Hour",
+        "price2Hours",
+        "price3Hours",
+        "price4Hours",
+        "priceFullDay",
+        "updatedByUid",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "OwnerSecrets": {
+      "title": "OwnerSecrets",
+      "description": "Strictly admin-only owner profile, payout bank details, and owner PIN.",
+      "type": "object",
+      "properties": {
+        "ownerUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerName": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "email": { "type": "string", "maxLength": 150 },
+        "phoneOrVipps": { "type": "string", "maxLength": 40 },
+        "bankAccount": { "type": "string", "maxLength": 40 },
+        "payoutEmail": { "type": "string", "maxLength": 150 },
+        "pin": { "type": "string", "minLength": 4, "maxLength": 20 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "ownerUid",
+        "ownerName",
+        "email",
+        "phoneOrVipps",
+        "bankAccount",
+        "payoutEmail",
+        "pin",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "AdminUser": {
+      "title": "AdminUser",
+      "description": "Explicit admin allowlist record keyed by UID.",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string", "maxLength": 150 },
+        "role": { "type": "string", "enum": ["owner", "admin"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["email", "role", "createdAt"]
+    },
+    "PayoutRecord": {
+      "title": "PayoutRecord",
+      "description": "Immutable owner payout settlement record.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "timestamp": { "type": "number" },
+        "amount": { "type": "number" },
+        "destinationType": { "type": "string", "enum": ["bank", "vipps"] },
+        "bankAccount": { "type": "string", "maxLength": 40 },
+        "vippsNumber": { "type": "string", "maxLength": 40 },
+        "recipientName": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "status": { "type": "string", "enum": ["completed", "processing"] },
+        "reference": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "receiptNumber": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "note": { "type": "string", "maxLength": 200 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "id",
+        "ownerUid",
+        "timestamp",
+        "amount",
+        "destinationType",
+        "recipientName",
+        "status",
+        "reference",
+        "receiptNumber",
+        "createdAt"
+      ]
+    },
+    "CommissionTransaction": {
+      "title": "CommissionTransaction",
+      "description": "Immutable revenue transaction record stored for the owner.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "timestamp": { "type": "number" },
+        "type": { "type": "string", "enum": ["per_player", "event_pass", "pro_ril_bigscreen", "tip_coffee"] },
+        "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "grossAmount": { "type": "number" },
+        "commissionAmount": { "type": "number" },
+        "playerCount": { "type": "number" },
+        "paymentMethod": { "type": "string", "enum": ["card", "apple_pay", "google_pay", "vipps", "invoice", "stripe"] },
+        "payerName": { "type": "string", "maxLength": 100 },
+        "status": { "type": "string", "enum": ["completed", "pending"] },
+        "reference": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "id",
+        "ownerUid",
+        "timestamp",
+        "type",
+        "title",
+        "grossAmount",
+        "commissionAmount",
+        "playerCount",
+        "paymentMethod",
+        "status",
+        "reference",
+        "createdAt"
+      ]
+    },
+    "ActiveRoomRecord": {
+      "title": "ActiveRoomRecord",
+      "description": "Public non-PII active arrangement room metadata for cross-instance Bingo & Quiz code validation.",
+      "type": "object",
+      "properties": {
+        "roomCode": { "type": "string", "minLength": 3, "maxLength": 16, "pattern": "^[A-Z0-9]+$" },
+        "ownerUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "hostName": { "type": "string", "minLength": 1, "maxLength": 60 },
+        "activeGame": { "type": "string", "enum": ["bingo", "quiz"] },
+        "hasBingo": { "type": "boolean" },
+        "hasQuiz": { "type": "boolean" },
+        "edition": { "type": "string", "enum": ["adult", "family", "christmas"] },
+        "calledBallNumbers": { "type": "array", "description": "Drawn ball numbers 1-75" },
+        "playersSummary": { "type": "array", "description": "Public Bingo player standings summary" },
+        "quizState": { "type": "object", "description": "Public phase-gated Quiz snapshot for cross-instance sync" },
+        "showCodeOnScreen": { "type": "boolean" },
+        "expiresAtMs": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "roomCode",
+        "ownerUid",
+        "hostName",
+        "activeGame",
+        "hasBingo",
+        "hasQuiz",
+        "edition",
+        "calledBallNumbers",
+        "showCodeOnScreen",
+        "expiresAtMs",
+        "createdAt",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/publicConfig/{configId}": {
+      "schema": { "$ref": "#/entities/PublicAppConfig" },
+      "description": "Publicly readable app configuration and package pricing tiers; writable only by verified admin."
+    },
+    "/ownerSecrets/{secretId}": {
+      "schema": { "$ref": "#/entities/OwnerSecrets" },
+      "description": "Private owner PIN, email, bank account, and Vipps configuration; readable and writable only by verified admin."
+    },
+    "/admins/{userId}": {
+      "schema": { "$ref": "#/entities/AdminUser" },
+      "description": "Admin role documents."
+    },
+    "/payouts/{payoutId}": {
+      "schema": { "$ref": "#/entities/PayoutRecord" },
+      "description": "Owner payout records."
+    },
+    "/transactions/{txId}": {
+      "schema": { "$ref": "#/entities/CommissionTransaction" },
+      "description": "Owner revenue transaction records."
+    },
+    "/activeRooms/{roomCode}": {
+      "schema": { "$ref": "#/entities/ActiveRoomRecord" },
+      "description": "Non-PII active room code records readable by single-document get for participants, writable/deletable only by verified admin."
+    }
+  }
+}

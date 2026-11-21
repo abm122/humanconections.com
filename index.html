@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="no">
+  <head>
+    <meta charset="UTF-8" />
+    <script>
+      (function () {
+        var isExtNoise = function (a, b, c) {
+          var s = String(a || '') + ' ' + String(b || '') + ' ' + String(c || '');
+          return (
+            s.indexOf('Failed to connect to MetaMask') !== -1 ||
+            s.indexOf('chrome-extension://') !== -1 ||
+            s.indexOf('moz-extension://') !== -1 ||
+            s.indexOf('safari-extension://') !== -1
+          );
+        };
+        window.addEventListener(
+          'error',
+          function (e) {
+            var stack = e && e.error && e.error.stack ? e.error.stack : '';
+            if (isExtNoise(e && e.message, e && e.filename, stack)) {
+              e.preventDefault();
+              e.stopImmediatePropagation();
+            }
+          },
+          true
+        );
+        window.addEventListener(
+          'unhandledrejection',
+          function (e) {
+            var r = e ? e.reason : null;
+            var msg = typeof r === 'string' ? r : r && r.message ? r.message : '';
+            var stack = r && typeof r === 'object' && r.stack ? r.stack : '';
+            if (isExtNoise(msg, '', stack)) {
+              e.preventDefault();
+              e.stopImmediatePropagation();
+            }
+          },
+          true
+        );
+        var origConsoleError = console.error;
+        console.error = function () {
+          for (var i = 0; i < arguments.length; i++) {
+            var arg = arguments[i];
+            var text = typeof arg === 'string' ? arg : (arg && (arg.message || arg.stack)) || '';
+            if (isExtNoise(text, '', '')) {
+              return;
+            }
+          }
+          return origConsoleError.apply(console, arguments);
+        };
+      })();
+    </script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>Human-connection — Enjoy Bingo · Enjoy Together</title>
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+    <meta http-equiv="Pragma" content="no-cache" />
+    <meta http-equiv="Expires" content="0" />
+    <meta name="description" content="Human-connection — Enjoy Bingo · Enjoy Together. Familievennlig sosial bingo-, quiz-, mimelek- og memory-plattform for arrangementer, familier, skoler og lag." />
+    <meta property="og:title" content="Human-connection — Enjoy Bingo · Enjoy Together" />
+    <meta property="og:description" content="Human-connection — Enjoy Bingo · Enjoy Together! Spill bingo, quiz, mimelek og memory sammen på stor skjerm og mobil." />
+    <meta property="og:type" content="website" />
+    <link rel="manifest" href="/manifest.json" />
+    <meta name="theme-color" content="#f59e0b" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Human-connection" />
+    <meta name="format-detection" content="telephone=no" />
+    <link rel="icon" type="image/svg+xml" href="/hug_icon.svg" />
+    <link rel="apple-touch-icon" href="/hug_icon.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..800;1,9..144,400..700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Outfit:wght@500;600;700;800&display=swap" rel="stylesheet">
+  </head>
+  <body class="bg-amber-950/20 text-slate-100 overflow-x-clip min-h-screen select-none">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+

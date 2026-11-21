@@ -1,0 +1,6 @@
+{
+  "name": "JoyBingo: Heartfelt Social Quest",
+  "description": "A joyful social bingo and connection game with interactive ball cage physics, heartwarming prompts, group party play, and celebratory audio.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

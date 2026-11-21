@@ -1,0 +1,337 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global default-deny safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isValidRoomCode(code) {
+      return code is string && code.size() >= 3 && code.size() <= 16 && code.matches('^[A-Z0-9]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isOwnerEmail() {
+      return isVerifiedUser() &&
+        ('email' in request.auth.token) &&
+        request.auth.token.email.lower() == 'adhanom3@gmail.com';
+    }
+
+    function isAdmin() {
+      return isOwnerEmail() || (
+        isVerifiedUser() &&
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    function isNonNegNumber(val) {
+      return (val is int || val is float) && val >= 0;
+    }
+
+    function isValidVisibleModules(m) {
+      return m is map &&
+        m.keys().hasAll([
+          'showBigScreen', 'showMixer', 'showSchedule', 'showQuests',
+          'showIosInstall', 'showPrint', 'showReport', 'showBroadcast',
+          'showParticipants', 'showDrumOnMobile', 'familyKidsMode'
+        ]) &&
+        m.keys().hasOnly([
+          'showBigScreen', 'showMixer', 'showSchedule', 'showQuests',
+          'showIosInstall', 'showPrint', 'showReport', 'showBroadcast',
+          'showParticipants', 'showDrumOnMobile', 'familyKidsMode'
+        ]) &&
+        m.showBigScreen is bool &&
+        m.showMixer is bool &&
+        m.showSchedule is bool &&
+        m.showQuests is bool &&
+        m.showIosInstall is bool &&
+        m.showPrint is bool &&
+        m.showReport is bool &&
+        m.showBroadcast is bool &&
+        m.showParticipants is bool &&
+        m.showDrumOnMobile is bool &&
+        m.familyKidsMode is bool;
+    }
+
+    function isValidStartPanelDefaults(s) {
+      return s is map &&
+        s.keys().hasAll([
+          'defaultMode', 'defaultCardDisplayMode', 'defaultCardsPerPlayer',
+          'defaultScreenDevice', 'defaultPlayerCount', 'showLiveDrum'
+        ]) &&
+        s.keys().hasOnly([
+          'defaultMode', 'defaultCardDisplayMode', 'defaultCardsPerPlayer',
+          'defaultScreenDevice', 'defaultPlayerCount', 'showLiveDrum'
+        ]) &&
+        s.defaultMode in ['ALL_IN_ONE', 'HUMAN_BINGO', 'CALLER_CAGE', 'PASS_PLAY'] &&
+        s.defaultCardDisplayMode in ['both', 'numbers', 'prompts'] &&
+        s.defaultCardsPerPlayer is int && s.defaultCardsPerPlayer >= 1 && s.defaultCardsPerPlayer <= 6 &&
+        s.defaultScreenDevice in ['mobile', 'desktop', 'big_screen'] &&
+        s.defaultPlayerCount is int && s.defaultPlayerCount >= 1 && s.defaultPlayerCount <= 100 &&
+        s.showLiveDrum is bool;
+    }
+
+    function isValidPublicAppConfig(data) {
+      return data.keys().hasAll([
+        'appTitle', 'appSubtitle', 'customWinnerTaskLine1', 'customWinnerTaskLine2',
+        'customWinnerTaskBingo', 'categoryOrder', 'visibleModules',
+        'isMonetizationActive', 'commissionPercent', 'fixedFeePerPlayer',
+        'eventPassPrice', 'proBigScreenPrice', 'eventExtensionPrice',
+        'price20MinTrial', 'price1Hour', 'price2Hours', 'price3Hours',
+        'price4Hours', 'priceFullDay', 'updatedByUid', 'createdAt', 'updatedAt'
+      ]) &&
+      data.keys().hasOnly([
+        'appTitle', 'appSubtitle', 'customWinnerTaskLine1', 'customWinnerTaskLine2',
+        'customWinnerTaskBingo', 'categoryOrder', 'visibleModules', 'startPanelDefaults',
+        'isMonetizationActive', 'commissionPercent', 'fixedFeePerPlayer',
+        'eventPassPrice', 'proBigScreenPrice', 'eventExtensionPrice',
+        'price20MinTrial', 'price1Hour', 'price2Hours', 'price3Hours',
+        'price4Hours', 'priceFullDay', 'updatedByUid', 'createdAt', 'updatedAt'
+      ]) &&
+      data.appTitle is string && data.appTitle.size() >= 1 && data.appTitle.size() <= 100 &&
+      data.appSubtitle is string && data.appSubtitle.size() <= 250 &&
+      data.customWinnerTaskLine1 is string && data.customWinnerTaskLine1.size() <= 300 &&
+      data.customWinnerTaskLine2 is string && data.customWinnerTaskLine2.size() <= 300 &&
+      data.customWinnerTaskBingo is string && data.customWinnerTaskBingo.size() <= 300 &&
+      data.categoryOrder is list && data.categoryOrder.size() > 0 && data.categoryOrder.size() <= 12 &&
+      data.categoryOrder[0] is string && data.categoryOrder[0].size() <= 40 &&
+      isValidVisibleModules(data.visibleModules) &&
+      (!('startPanelDefaults' in data) || isValidStartPanelDefaults(data.startPanelDefaults)) &&
+      data.isMonetizationActive is bool &&
+      isNonNegNumber(data.commissionPercent) &&
+      isNonNegNumber(data.fixedFeePerPlayer) &&
+      isNonNegNumber(data.eventPassPrice) &&
+      isNonNegNumber(data.proBigScreenPrice) &&
+      isNonNegNumber(data.eventExtensionPrice) &&
+      isNonNegNumber(data.price20MinTrial) &&
+      isNonNegNumber(data.price1Hour) &&
+      isNonNegNumber(data.price2Hours) &&
+      isNonNegNumber(data.price3Hours) &&
+      isNonNegNumber(data.price4Hours) &&
+      isNonNegNumber(data.priceFullDay) &&
+      isValidId(data.updatedByUid) &&
+      data.updatedByUid == request.auth.uid &&
+      data.createdAt is timestamp &&
+      data.updatedAt is timestamp;
+    }
+
+    function isValidOwnerSecrets(data) {
+      return data.keys().hasAll([
+        'ownerUid', 'ownerName', 'email', 'phoneOrVipps',
+        'bankAccount', 'payoutEmail', 'pin', 'createdAt', 'updatedAt'
+      ]) &&
+      data.keys().hasOnly([
+        'ownerUid', 'ownerName', 'email', 'phoneOrVipps',
+        'bankAccount', 'payoutEmail', 'pin', 'createdAt', 'updatedAt'
+      ]) &&
+      isValidId(data.ownerUid) &&
+      data.ownerUid == request.auth.uid &&
+      data.ownerName is string && data.ownerName.size() >= 1 && data.ownerName.size() <= 100 &&
+      data.email is string && data.email.size() <= 150 &&
+      data.phoneOrVipps is string && data.phoneOrVipps.size() <= 40 &&
+      data.bankAccount is string && data.bankAccount.size() <= 40 &&
+      data.payoutEmail is string && data.payoutEmail.size() <= 150 &&
+      data.pin is string && data.pin.size() >= 4 && data.pin.size() <= 20 &&
+      data.createdAt is timestamp &&
+      data.updatedAt is timestamp;
+    }
+
+    function isValidPayoutRecord(data) {
+      return data.keys().hasAll([
+        'id', 'ownerUid', 'timestamp', 'amount', 'destinationType',
+        'recipientName', 'status', 'reference', 'receiptNumber', 'createdAt'
+      ]) &&
+      data.keys().hasOnly([
+        'id', 'ownerUid', 'timestamp', 'amount', 'destinationType',
+        'bankAccount', 'vippsNumber', 'recipientName', 'status',
+        'reference', 'receiptNumber', 'note', 'createdAt'
+      ]) &&
+      isValidId(data.id) &&
+      isValidId(data.ownerUid) &&
+      data.ownerUid == request.auth.uid &&
+      isNonNegNumber(data.timestamp) &&
+      isNonNegNumber(data.amount) &&
+      data.destinationType in ['bank', 'vipps'] &&
+      (!('bankAccount' in data) || (data.bankAccount is string && data.bankAccount.size() <= 40)) &&
+      (!('vippsNumber' in data) || (data.vippsNumber is string && data.vippsNumber.size() <= 40)) &&
+      data.recipientName is string && data.recipientName.size() >= 1 && data.recipientName.size() <= 100 &&
+      data.status in ['completed', 'processing'] &&
+      data.reference is string && data.reference.size() >= 1 && data.reference.size() <= 80 &&
+      data.receiptNumber is string && data.receiptNumber.size() >= 1 && data.receiptNumber.size() <= 80 &&
+      (!('note' in data) || (data.note is string && data.note.size() <= 200)) &&
+      data.createdAt is timestamp;
+    }
+
+    function isValidCommissionTransaction(data) {
+      return data.keys().hasAll([
+        'id', 'ownerUid', 'timestamp', 'type', 'title',
+        'grossAmount', 'commissionAmount', 'playerCount',
+        'paymentMethod', 'status', 'reference', 'createdAt'
+      ]) &&
+      data.keys().hasOnly([
+        'id', 'ownerUid', 'timestamp', 'type', 'title',
+        'grossAmount', 'commissionAmount', 'playerCount',
+        'paymentMethod', 'payerName', 'status', 'reference', 'createdAt'
+      ]) &&
+      isValidId(data.id) &&
+      isValidId(data.ownerUid) &&
+      data.ownerUid == request.auth.uid &&
+      isNonNegNumber(data.timestamp) &&
+      data.type in ['per_player', 'event_pass', 'pro_ril_bigscreen', 'tip_coffee'] &&
+      data.title is string && data.title.size() >= 1 && data.title.size() <= 200 &&
+      isNonNegNumber(data.grossAmount) &&
+      isNonNegNumber(data.commissionAmount) &&
+      isNonNegNumber(data.playerCount) &&
+      data.paymentMethod in ['card', 'apple_pay', 'google_pay', 'vipps', 'invoice', 'stripe'] &&
+      (!('payerName' in data) || (data.payerName is string && data.payerName.size() <= 100)) &&
+      data.status in ['completed', 'pending'] &&
+      data.reference is string && data.reference.size() >= 1 && data.reference.size() <= 80 &&
+      data.createdAt is timestamp;
+    }
+
+    // Public app configuration & prices (readable by anyone, writable only by verified admin)
+    match /publicConfig/{configId} {
+      allow get: if isValidId(configId);
+      allow list: if false;
+      allow create: if isAdmin() && isValidId(configId) &&
+        isValidPublicAppConfig(incoming()) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isAdmin() && isValidId(configId) &&
+        isValidPublicAppConfig(incoming()) &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'appTitle', 'appSubtitle', 'customWinnerTaskLine1', 'customWinnerTaskLine2',
+          'customWinnerTaskBingo', 'categoryOrder', 'visibleModules', 'startPanelDefaults',
+          'isMonetizationActive', 'commissionPercent', 'fixedFeePerPlayer',
+          'eventPassPrice', 'proBigScreenPrice', 'eventExtensionPrice',
+          'price20MinTrial', 'price1Hour', 'price2Hours', 'price3Hours',
+          'price4Hours', 'priceFullDay', 'updatedByUid', 'updatedAt'
+        ]);
+      allow delete: if false;
+    }
+
+    // Strictly private owner secrets (PIN, bank account, email, phone)
+    match /ownerSecrets/{secretId} {
+      allow get: if isAdmin() && isValidId(secretId);
+      allow list: if isOwnerEmail() && resource.data.ownerUid == request.auth.uid;
+      allow create: if isAdmin() && isValidId(secretId) &&
+        isValidOwnerSecrets(incoming()) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isAdmin() && isValidId(secretId) &&
+        isValidOwnerSecrets(incoming()) &&
+        incoming().ownerUid == existing().ownerUid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'ownerName', 'email', 'phoneOrVipps', 'bankAccount', 'payoutEmail', 'pin', 'updatedAt'
+        ]);
+      allow delete: if false;
+    }
+
+    // Explicit admin allowlist
+    match /admins/{userId} {
+      allow get: if isAdmin() && isValidId(userId);
+      allow list, create, update, delete: if false;
+    }
+
+    // Immutable owner payouts
+    match /payouts/{payoutId} {
+      allow get: if isAdmin() && isValidId(payoutId);
+      allow list: if isOwnerEmail() && resource.data.ownerUid == request.auth.uid;
+      allow create: if isAdmin() && isValidId(payoutId) &&
+        isValidPayoutRecord(incoming()) &&
+        incoming().createdAt == request.time;
+      allow update, delete: if false;
+    }
+
+    // Immutable owner transactions
+    match /transactions/{txId} {
+      allow get: if isAdmin() && isValidId(txId);
+      allow list: if isOwnerEmail() && resource.data.ownerUid == request.auth.uid;
+      allow create: if isAdmin() && isValidId(txId) &&
+        isValidCommissionTransaction(incoming()) &&
+        incoming().createdAt == request.time;
+      allow update, delete: if false;
+    }
+
+    function isValidActiveRoom(data, roomCode) {
+      return data.keys().hasAll([
+        'roomCode', 'ownerUid', 'hostName', 'activeGame', 'hasBingo', 'hasQuiz',
+        'edition', 'calledBallNumbers', 'showCodeOnScreen', 'expiresAtMs',
+        'createdAt', 'updatedAt'
+      ]) &&
+      data.keys().hasOnly([
+        'roomCode', 'ownerUid', 'hostName', 'activeGame', 'hasBingo', 'hasQuiz',
+        'edition', 'calledBallNumbers', 'playersSummary', 'quizState', 'showCodeOnScreen',
+        'expiresAtMs', 'createdAt', 'updatedAt'
+      ]) &&
+      isValidRoomCode(data.roomCode) &&
+      data.roomCode == roomCode &&
+      isValidId(data.ownerUid) &&
+      data.ownerUid == request.auth.uid &&
+      data.hostName is string && data.hostName.size() >= 1 && data.hostName.size() <= 60 &&
+      data.activeGame in ['bingo', 'quiz'] &&
+      data.hasBingo is bool &&
+      data.hasQuiz is bool &&
+      data.edition in ['adult', 'family', 'christmas'] &&
+      data.calledBallNumbers is list &&
+      data.calledBallNumbers.size() <= 75 &&
+      (data.calledBallNumbers.size() == 0 || (
+        data.calledBallNumbers[0] is int &&
+        data.calledBallNumbers[0] >= 1 &&
+        data.calledBallNumbers[0] <= 75
+      )) &&
+      (!('playersSummary' in data) || (data.playersSummary is list && data.playersSummary.size() <= 50)) &&
+      (!('quizState' in data) || (data.quizState is map && data.quizState.size() <= 20)) &&
+      data.showCodeOnScreen is bool &&
+      isNonNegNumber(data.expiresAtMs) &&
+      data.createdAt is timestamp &&
+      data.updatedAt is timestamp;
+    }
+
+    // Active arrangement rooms (single-doc get by exact room code; list blocked; writes by verified host owner or admin)
+    match /activeRooms/{roomCode} {
+      allow get: if isValidRoomCode(roomCode);
+      allow list: if false;
+      allow create: if isVerifiedUser() && isValidRoomCode(roomCode) &&
+        isValidActiveRoom(incoming(), roomCode) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if (isAdmin() || (isVerifiedUser() && existing().ownerUid == request.auth.uid)) &&
+        isValidRoomCode(roomCode) &&
+        isValidActiveRoom(incoming(), roomCode) &&
+        incoming().ownerUid == existing().ownerUid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'hostName', 'activeGame', 'hasBingo', 'hasQuiz', 'edition',
+          'calledBallNumbers', 'playersSummary', 'quizState', 'showCodeOnScreen',
+          'expiresAtMs', 'updatedAt'
+        ]);
+      allow delete: if (isAdmin() || (isVerifiedUser() && existing().ownerUid == request.auth.uid)) &&
+        isValidRoomCode(roomCode);
+    }
+  }
+}

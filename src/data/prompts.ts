@@ -1,0 +1,352 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import { BingoTheme } from '../types/bingo';
+
+export interface ThemeConfig {
+  id: BingoTheme;
+  title: string;
+  subtitle: string;
+  tagline: string;
+  prompts: string[];
+}
+
+export const THEMES: Record<BingoTheme, ThemeConfig> = {
+  heartfelt: {
+    id: 'heartfelt',
+    title: 'Heartfelt Connection',
+    subtitle: 'Deep warmth, empathy, and personal stories',
+    tagline: 'Find someone who touches hearts',
+    prompts: [
+      "Can name 3 things they're deeply grateful for today",
+      "Kept a handwritten letter from someone special",
+      "Listened to a friend in need without offering unsolicited advice",
+      "Learned a cherished family or elder's life story",
+      "Forgave someone or let go of a heavy grudge",
+      "Has a piece of advice that permanently guided their life",
+      "Traveled somewhere that opened their worldview",
+      "Cried tears of pure relief or joy recently",
+      "Felt an immediate warm connection with a stranger",
+      "Knows the meaning behind their own name",
+      "Cherishes an heirloom or small sentimental keepsake",
+      "Helped a neighbor or friend through a quiet storm",
+      "Has a personal ritual that brings them instant peace",
+      "Still laughs about a memory from over 10 years ago",
+      "Stood up for someone when it was difficult",
+      "Feels happiest when walking in nature or rain",
+      "Cooks a recipe passed down through generations",
+      "Wrote an unsent letter of gratitude to an old mentor",
+      "Can remember the exact moment they felt truly at home",
+      "Reconnected with a childhood pal after years apart",
+      "Holds a core memory of watching a sunset with someone dear",
+      "Gave a hug that someone really needed that day",
+      "Found unexpected joy in an accidental detour",
+      "Knows what song immediately calms their soul",
+      "Celebrated a small quiet win that nobody else knew about",
+      "Has told their loved ones 'I appreciate you' this week",
+      "Keeps a list of beautiful dreams they still want to live",
+      "Knows how to sit in peaceful comfortable silence"
+    ]
+  },
+  laughter: {
+    id: 'laughter',
+    title: 'Laughter & Playful Quirks',
+    subtitle: 'Silly moments, hidden quirks, and joyful smiles',
+    tagline: 'Find someone who brings the giggles',
+    prompts: [
+      "Can do an unexpectedly funny animal impression",
+      "Danced to their favorite song alone in the kitchen",
+      "Has laughed so hard they cried or snorted this week",
+      "Knows a silly dad joke that never fails to make people groan",
+      "Can whistle a cheerful tune on command right now",
+      "Still watches cartoons or animated movies as comfort food",
+      "Has accidentally waved at a stranger thinking they were a friend",
+      "Has a guilty pleasure snack combination that sounds weird",
+      "Knows all the lyrics to a nostalgic 90s/00s hit song",
+      "Can do a silly dance move right here and now",
+      "Talks out loud to their pets or indoor plants regularly",
+      "Has worn mismatched socks on purpose for good luck",
+      "Tried a viral internet recipe that turned into a hilarious disaster",
+      "Has an absurdly specific superstition or good luck habit",
+      "Accidentally walked into the wrong room with full confidence",
+      "Can wiggle their ears or do a quirky parlor trick",
+      "Has laughed out loud at a meme in public silence",
+      "Sang passionately with a shampoo bottle microphone",
+      "Named their car, plant, or vacuum cleaner",
+      "Made up a ridiculous nickname for a close friend",
+      "Got completely lost in their own hometown",
+      "Has a funny story about meeting their partner or best friend",
+      "Invented a strange board game or backyard sport as a kid",
+      "Can recite iconic lines from a comedy film by heart"
+    ]
+  },
+  kindness: {
+    id: 'kindness',
+    title: 'Kindness & Community Care',
+    subtitle: 'Everyday generosity, community support, and warmth',
+    tagline: 'Find someone who spreads gentleness',
+    prompts: [
+      "Gave a genuine, unexpected compliment to someone today",
+      "Left an extra generous tip or thank-you note for service staff",
+      "Donated clothes, books, or blood to support others recently",
+      "Picked up litter along a favorite walking trail or street",
+      "Checked in on someone who seemed quiet or stressed",
+      "Cooked or bought a meal for someone without being asked",
+      "Rescued or fostered an animal in need of a good home",
+      "Volunteered their time for a community cause or youth group",
+      "Let someone with fewer items go ahead of them in a long queue",
+      "Left a five-star review for an indie bookstore, café, or artist",
+      "Held the elevator or door for someone rushing behind them",
+      "Supported a local neighborhood market or small maker",
+      "Shared garden vegetables, flowers, or homemade baked goods",
+      "Forgave a mistake graciously without making a fuss",
+      "Offered a sincere apology when they were in the wrong",
+      "Made an anxious newcomer feel welcome in a group setting",
+      "Helped carry heavy groceries or luggage for a stranger",
+      "Sent an uplifting message to someone taking an exam or interview",
+      "Planted a tree, flowers, or bee-friendly herbs this season",
+      "Donated books to a little free library in their town",
+      "Smiled warmly and made someone feel truly seen in passing",
+      "Organized a gathering just to bring isolated people together"
+    ]
+  },
+  gratitude: {
+    id: 'gratitude',
+    title: 'Wisdom & Gratitude Journey',
+    subtitle: 'Life milestones, self-discovery, and quiet appreciation',
+    tagline: 'Find someone who carries life wisdom',
+    prompts: [
+      "Overcame a challenging setback that made them wiser",
+      "Started a creative practice late in life (painting, music, craft)",
+      "Practices daily mindfulness, breathwork, or meditation",
+      "Read a book that reshaped how they treat people",
+      "Took a courageous career or life pivot toward what they love",
+      "Can describe their ideal Sunday morning in vivid detail",
+      "Finds pure awe in gazing at the night stars or clouds",
+      "Has kept a gratitude journal or photo diary of good days",
+      "Made peace with an ambition that no longer served them",
+      "Knows the recipe for their ultimate comforting bowl of soup",
+      "Learned to enjoy their own solitary company without a screen",
+      "Can name a teacher or mentor who believed in their potential",
+      "Took a brave step into the unknown all by themselves",
+      "Maintains a friendship spanning more than fifteen years",
+      "Finds happiness in simple fresh bread and morning coffee",
+      "Has walked by the ocean, river, or lake to clear their mind",
+      "Values emotional honesty far higher than perfection",
+      "Discovered that an apparent failure was an unexpected gift",
+      "Cultivates patience when life moves slower than expected"
+    ]
+  },
+  ril: {
+    id: 'ril',
+    title: 'RIL – Relasjon, Inkludering & Livsglede',
+    subtitle: 'Fellesskap, lagånd, sang, musikk, vennskap og livsglede',
+    tagline: 'Finn noen som sprer allsang, musikk, inkludering og varme',
+    prompts: [
+      "🎵 Sang & Musikk: Syng eller nynn 5 sekunder av din favorittallsang eller klubbsang!",
+      "🎶 Musikk-glede: Hvilken sang får deg ALLTID i topp humør på et sekund?",
+      "🎤 Musikkquiz: Nynn en kjent norsk melodi – første som gjetter får et poeng!",
+      "🎵 Sangminne: Hvilken sang minner deg mest om en fantastisk sommerdag eller feiring?",
+      "🎶 Garderobesang: Hva er den ultimate sangen for energi, samhold og heiarop?",
+      "👏 Rytmeglede: Klapp eller plystre takten til en legendarisk klassiker sammen!",
+      "🎤 Allsang: Hvem sang 'Optimist, jeg vet det går bra til sist...'? (Jahn Teigen)",
+      "🎵 Musikkhjerte: Nevn en artist eller sang som har betydd spesielt mye for deg",
+      "🎶 Seiersdans: Hvilken sang ville du satt på til din personlige vinnerdans?",
+      "Har heiet og støttet en lagkamerat eller venn i motgang",
+      "Inviterte en ny person med på en aktivitet eller tur",
+      "Finner ekte glede i frisk luft, lek og bevegelse",
+      "Deler alltid ut et varmt smil og et hyggelig 'god morgen'",
+      "Feiret andres fremgang med like stor entusiasme som sin egen",
+      "Har lært bort en ferdighet eller et triks med tålmodighet",
+      "Hjalp til med rydding eller fellesoppgaver uten å bli bedt om det",
+      "Vet hvordan man gjør en nervøs person trygg i en gruppe",
+      "Spiller fair og verdsetter samspill høyere enn å vinne alene",
+      "Tar initiativ til en pause med latter når stemningen er anspent",
+      "Har takket trenere, ledere eller frivillige etter en samling",
+      "Inkluderer alle uansett alder, bakgrunn eller ferdighetsnivå",
+      "Husker navnet på nye deltagere og får dem til å føle seg velkommen",
+      "Drikker nok vann og minner andre på å ta vare på helsa og kroppen",
+      "Har overvunnet en utfordring gjennom felles laginnsats",
+      "Foretar sunne pauser fra skjerm for å være til stede med folk",
+      "Gir en 'high five' eller tommel opp til noen som prøver sitt beste",
+      "Går eller sykler til aktiviteter når det er mulig",
+      "Lytter aktivt til alles forslag før avgjørelser tas",
+      "Deler frukt, snacks eller utstyr med andre",
+      "Tar vare på miljøet og plukker opp søppel etter trening og tur",
+      "Sprer positiv energi som smitter over på hele rommet",
+      "Viser raushet og respekt selv når man er uenig",
+      "Foreslår en morsom felleslek som alle kan delta på",
+      "Har deltatt på en meningsfull fellesdugnad for klubben eller nærmiljøet",
+      "Gir oppmuntrende ord til noen som trengte en oppmuntring",
+      "Mener at idrett, lek og trivsel skal være fylt med ekte glede"
+    ]
+  },
+  classic_joy: {
+    id: 'classic_joy',
+    title: 'Joy Bingo (Klassisk Gledelig)',
+    subtitle: '75-tall bingo kombinert med hverdagsglede og varme gnister',
+    tagline: 'Rull trommelen for B-I-N-G-O tall og oppløftende øyeblikk',
+    prompts: [
+      "Fant glede i en kopp varm kaffe eller te i dag",
+      "Smilte til en fremmed på gaten eller i butikken",
+      "Hørte på en sang som ga umiddelbar godfølelse",
+      "Tok en liten pause for å puste dypt og kjenne roen",
+      "Sa noe oppmuntrende til noen som trengte det",
+      "Ble minnet på et kjært og morsomt barndomsminne",
+      "Takket noen for en liten, men fin hverdagsgjerning",
+      "La merke til noe vakkert i naturen eller himmelen",
+      "Lo godt av en herlig historie eller en god spøk",
+      "Føler takknemlighet for en god venn eller familie",
+      "Ga en hjelpende hånd eller holdt døren for noen",
+      "Fant ro i et stille øyeblikk uten skjerm",
+      "Spredte positiv og oppløftende stemning i en samtale",
+      "Feiret et lite personlig hverdagsøyeblikk eller seier",
+      "Delte et lunt smil eller en god latter sammen",
+      "Gjorde en uventet god gjerning for noen andre",
+      "Har et favorittsted i nærområdet som gir energi",
+      "Nøt en god spasertur eller frisk luft denne uken",
+      "Lærte noe nytt og spennende som ga inspirasjon",
+      "Fikk noen andre til å føle seg verdsatt og sett",
+      "Spiste noe skikkelig godt som ga matglede",
+      "Gledet seg over en hyggelig melding eller telefon",
+      "Kjente på stolthet over å mestre en utfordring",
+      "Lyttet med oppmerksomhet til noens opplevelse",
+      "Skapte litt ekstra hygge rundt seg i hverdagen"
+    ]
+  },
+  family_kids: {
+    id: 'family_kids',
+    title: 'Familie & Barn – Spill med vert',
+    subtitle: 'Lekne oppgaver, dyrelyder, sang og high-fives med bingoverten',
+    tagline: 'Moro for hele familien hvor barn og voksne spiller sammen',
+    prompts: [
+      "Gi en 'high-five' til bingoverten! 🖐️",
+      "Fortell om ditt favorittdyr eller et kjæledyr du liker 🐶",
+      "Hopp 3 ganger opp og ned og smil kjempefint! 🦘",
+      "Gi en god og varm klem til noen i rommet 🤗",
+      "Vis frem din morsomste grimase eller dyrelyd 🦁",
+      "Syng eller nynn en liten sangstrofe sammen med verten 🎵",
+      "Hva er din favoritt-is eller favorittgodteri? 🍦",
+      "Tegn et lite hjerte eller en stjerne i luften med fingeren ⭐",
+      "Klapp i hendene i takt med bingoverten 👏",
+      "Fortell en liten gåte eller en morsom vits 😄",
+      "Hva er den aller morsomste leken du vet om? 🎈",
+      "Rop et høyt og muntert 'Heia!' sammen med verten 📣",
+      "Gjør en tøff superhelt-pose for alle rundt deg 🦸",
+      "Hvem i rommet er flinkest til å fortelle morsomme historier? 📖",
+      "Nevn 3 ting du liker aller best med bursdager 🎂",
+      "Vis frem din beste lille seiersdans eller robot-dans 🤖",
+      "Hva er din favorittfarge i hele regnbuen? 🌈",
+      "Gi en tommel opp til den som sitter ved siden av deg 👍",
+      "Hvilket kosedyr eller leketøy er din beste venn? 🧸",
+      "Lag lyden av en rask racerbil eller et fly 🚀",
+      "Hva er det gøyeste du har gjort på skolen eller i barnehagen? 🎨",
+      "Del et stort smil som smitter over til bingoverten 😊",
+      "Lær bingoverten et hemmelig, morsomt håndtrykk 🤝",
+      "Hva er din favorittfilm eller tegnefilm? 🍿",
+      "Hopp på ett bein i fem sekunder uten å falle! 🦩",
+      "Hils pent som en konge, dronning eller prinsesse 👑",
+      "Fortell hva som gjør deg ekstra glad og stolt i dag ☀️",
+      "Lag en morsom latterlyd som får hele rommet til å le 😂"
+    ]
+  }
+};
+
+// 75 Joyful Affirmation Balls for the Tumbler / Caller Mode
+export const JOYFUL_BALLS_MAP: { letter: 'B' | 'I' | 'N' | 'G' | 'O'; number: number; affirmation: string; color: string }[] = [
+  // B (1-15) - Blue / Turquoise
+  { letter: 'B', number: 1, affirmation: "Brave Beginnings", color: '#0284c7' },
+  { letter: 'B', number: 2, affirmation: "Boundless Curiosity", color: '#0284c7' },
+  { letter: 'B', number: 3, affirmation: "Bright Hope", color: '#0284c7' },
+  { letter: 'B', number: 4, affirmation: "Belly Laughs", color: '#0284c7' },
+  { letter: 'B', number: 5, affirmation: "Beloved Memories", color: '#0284c7' },
+  { letter: 'B', number: 6, affirmation: "Bold Kindness", color: '#0284c7' },
+  { letter: 'B', number: 7, affirmation: "Beautiful Detours", color: '#0284c7' },
+  { letter: 'B', number: 8, affirmation: "Balmy Sunshine", color: '#0284c7' },
+  { letter: 'B', number: 9, affirmation: "Big Gentle Hugs", color: '#0284c7' },
+  { letter: 'B', number: 10, affirmation: "Bountiful Hearts", color: '#0284c7' },
+  { letter: 'B', number: 11, affirmation: "Breathe in Peace", color: '#0284c7' },
+  { letter: 'B', number: 12, affirmation: "Be Yourself Fully", color: '#0284c7' },
+  { letter: 'B', number: 13, affirmation: "Blooming Patience", color: '#0284c7' },
+  { letter: 'B', number: 14, affirmation: "Balanced Harmony", color: '#0284c7' },
+  { letter: 'B', number: 15, affirmation: "Brilliant Wonder", color: '#0284c7' },
+
+  // I (16-30) - Indigo / Purple
+  { letter: 'I', number: 16, affirmation: "Inner Light", color: '#7c3aed' },
+  { letter: 'I', number: 17, affirmation: "Inspiring Others", color: '#7c3aed' },
+  { letter: 'I', number: 18, affirmation: "Infinite Play", color: '#7c3aed' },
+  { letter: 'I', number: 19, affirmation: "Imaginative Spark", color: '#7c3aed' },
+  { letter: 'I', number: 20, affirmation: "Island of Calm", color: '#7c3aed' },
+  { letter: 'I', number: 21, affirmation: "Invaluable Friendship", color: '#7c3aed' },
+  { letter: 'I', number: 22, affirmation: "Intuitive Wisdom", color: '#7c3aed' },
+  { letter: 'I', number: 23, affirmation: "Illuminating Smiles", color: '#7c3aed' },
+  { letter: 'I', number: 24, affirmation: "Infectious Joy", color: '#7c3aed' },
+  { letter: 'I', number: 25, affirmation: "Inviting Warmth", color: '#7c3aed' },
+  { letter: 'I', number: 26, affirmation: "Instant Empathy", color: '#7c3aed' },
+  { letter: 'I', number: 27, affirmation: "Immense Gratitude", color: '#7c3aed' },
+  { letter: 'I', number: 28, affirmation: "Insightful Kindness", color: '#7c3aed' },
+  { letter: 'I', number: 29, affirmation: "Incredible Growth", color: '#7c3aed' },
+  { letter: 'I', number: 30, affirmation: "Intrepid Spirit", color: '#7c3aed' },
+
+  // N (31-45) - Emerald / Green
+  { letter: 'N', number: 31, affirmation: "Neighborly Love", color: '#059669' },
+  { letter: 'N', number: 32, affirmation: "New Perspectives", color: '#059669' },
+  { letter: 'N', number: 33, affirmation: "Nourishing Conversations", color: '#059669' },
+  { letter: 'N', number: 34, affirmation: "Natural Harmony", color: '#059669' },
+  { letter: 'N', number: 35, affirmation: "Never-ending Kindness", color: '#059669' },
+  { letter: 'N', number: 36, affirmation: "Noble Intentions", color: '#059669' },
+  { letter: 'N', number: 37, affirmation: "Nurturing Growth", color: '#059669' },
+  { letter: 'N', number: 38, affirmation: "Newborn Optimism", color: '#059669' },
+  { letter: 'N', number: 39, affirmation: "Nighttime Peace", color: '#059669' },
+  { letter: 'N', number: 40, affirmation: "Nonstop Cheerful", color: '#059669' },
+  { letter: 'N', number: 41, affirmation: "Notice the Magic", color: '#059669' },
+  { letter: 'N', number: 42, affirmation: "Naturally Radiant", color: '#059669' },
+  { letter: 'N', number: 43, affirmation: "Nest of Safety", color: '#059669' },
+  { letter: 'N', number: 44, affirmation: "Nuanced Grace", color: '#059669' },
+  { letter: 'N', number: 45, affirmation: "Novel Discoveries", color: '#059669' },
+
+  // G (46-60) - Amber / Gold
+  { letter: 'G', number: 46, affirmation: "Generous Heart", color: '#d97706' },
+  { letter: 'G', number: 47, affirmation: "Golden Laughter", color: '#d97706' },
+  { letter: 'G', number: 48, affirmation: "Gentle Strength", color: '#d97706' },
+  { letter: 'G', number: 49, affirmation: "Grateful Living", color: '#d97706' },
+  { letter: 'G', number: 50, affirmation: "Grace in Motion", color: '#d97706' },
+  { letter: 'G', number: 51, affirmation: "Good News Ahead", color: '#d97706' },
+  { letter: 'G', number: 52, affirmation: "Glowing Energy", color: '#d97706' },
+  { letter: 'G', number: 53, affirmation: "Grounded Mind", color: '#d97706' },
+  { letter: 'G', number: 54, affirmation: "Genuine Presence", color: '#d97706' },
+  { letter: 'G', number: 55, affirmation: "Growing Joy", color: '#d97706' },
+  { letter: 'G', number: 56, affirmation: "Grand Adventures", color: '#d97706' },
+  { letter: 'G', number: 57, affirmation: "Giggles Shared", color: '#d97706' },
+  { letter: 'G', number: 58, affirmation: "Generations Linked", color: '#d97706' },
+  { letter: 'G', number: 59, affirmation: "Glimmer of Truth", color: '#d97706' },
+  { letter: 'G', number: 60, affirmation: "Grateful Breath", color: '#d97706' },
+
+  // O (61-75) - Rose / Coral
+  { letter: 'O', number: 61, affirmation: "Open Hearts", color: '#e11d48' },
+  { letter: 'O', number: 62, affirmation: "Optimistic Horizons", color: '#e11d48' },
+  { letter: 'O', number: 63, affirmation: "Overcoming Doubts", color: '#e11d48' },
+  { letter: 'O', number: 64, affirmation: "Overflowing Joy", color: '#e11d48' },
+  { letter: 'O', number: 65, affirmation: "Original Spark", color: '#e11d48' },
+  { letter: 'O', number: 66, affirmation: "Ongoing Wonder", color: '#e11d48' },
+  { letter: 'O', number: 67, affirmation: "One Shared Humanity", color: '#e11d48' },
+  { letter: 'O', number: 68, affirmation: "Open Arms", color: '#e11d48' },
+  { letter: 'O', number: 69, affirmation: "Organic Peace", color: '#e11d48' },
+  { letter: 'O', number: 70, affirmation: "Outpouring of Care", color: '#e11d48' },
+  { letter: 'O', number: 71, affirmation: "Observing Beauty", color: '#e11d48' },
+  { letter: 'O', number: 72, affirmation: "Open-minded Compassion", color: '#e11d48' },
+  { letter: 'O', number: 73, affirmation: "Over the Moon", color: '#e11d48' },
+  { letter: 'O', number: 74, affirmation: "Outstanding Smiles", color: '#e11d48' },
+  { letter: 'O', number: 75, affirmation: "Our Connected Journey", color: '#e11d48' }
+];
+
+export function shuffleArray<T>(array: T[]): T[] {
+  const arr = [...array];
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
