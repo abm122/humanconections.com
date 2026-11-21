@@ -5,10 +5,16 @@ set -euo pipefail
 # Supported regions in Europe: europe-west1 (Belgium), europe-north1 (Finland), europe-west4 (Netherlands)
 # Supported regions in US/Asia: us-central1, us-east1, us-east4, us-west1, asia-east1, asia-northeast1, asia-southeast1
 
-PROJECT_ID="${PROJECT_ID:-tranquil-service-9bcxw}"
+PROJECT_ID="${PROJECT_ID:-$(gcloud config get-value project 2>/dev/null || true)}"
 SERVICE_NAME="${SERVICE_NAME:-human-connection}"
 REGION="${REGION:-europe-west1}"
-DOMAIN="${DOMAIN:-humanconnection.com}"
+DOMAIN="${DOMAIN:-humanconections.com}"
+
+if [ -z "$PROJECT_ID" ]; then
+  echo "Error: No active Google Cloud project found."
+  echo "Run: gcloud config set project YOUR_PROJECT_ID"
+  exit 1
+fi
 
 echo "Deploying $SERVICE_NAME to Cloud Run region: $REGION (project: $PROJECT_ID)..."
 

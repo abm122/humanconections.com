@@ -385,7 +385,7 @@ class OwnerControlService {
       }
       this.cloudLastSyncedAt = Date.now();
     } catch (err) {
-      this.cloudLastError = err instanceof Error ? err.message : 'Kunne ikke synkronisere med Firestore.';
+      this.cloudLastError = firebasePersistence.formatFirebaseError(err);
     } finally {
       this.isCloudSyncing = false;
       this.cloudSyncPromise = null;
@@ -813,7 +813,7 @@ class OwnerControlService {
           this.notify();
         } catch (cloudErr) {
           this.pinModifiedLocally = true;
-          cloudErrorMsg = cloudErr instanceof Error ? cloudErr.message : 'Kunne ikke lagre i Firestore.';
+          cloudErrorMsg = firebasePersistence.formatFirebaseError(cloudErr);
         }
       } else {
         this.pinModifiedLocally = true;
@@ -915,10 +915,9 @@ class OwnerControlService {
 
       return { success: true, savedToCloud };
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Nettverksfeil ved lagring til server/sky.';
       return {
         success: false,
-        error: msg,
+        error: firebasePersistence.formatFirebaseError(err),
       };
     }
   }

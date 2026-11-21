@@ -15,6 +15,7 @@ export const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({ prompt: 'select_account' });
 
 export const AUTHORIZED_OWNER_EMAIL = 'adhanom3@gmail.com';
+export const FIREBASE_PROJECT_ID = firebaseConfig.projectId;
 
 export enum OperationType {
   CREATE = 'create',

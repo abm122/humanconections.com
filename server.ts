@@ -28,6 +28,23 @@ wss.on('error', (err: unknown) => {
 });
 
 app.set('trust proxy', true);
+if (process.env.NODE_ENV === 'production') {
+  app.use((req, res, next) => {
+    if (req.path === '/api/health' || req.path === '/healthz') {
+      return next();
+    }
+    const proto = (req.headers['x-forwarded-proto'] as string)?.split(',')[0]?.trim().toLowerCase();
+    const host = ((req.headers['x-forwarded-host'] as string) || req.headers.host || '').split(',')[0]?.trim();
+    const isLocal = !host || host.startsWith('localhost') || host.startsWith('127.0.0.1');
+    if (!isLocal && proto === 'http') {
+      return res.redirect(301, `https://${host}${req.originalUrl}`);
+    }
+    if (!isLocal && proto === 'https') {
+      res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+    }
+    next();
+  });
+}
 app.use(express.json({ limit: '2mb' }));
 
 interface ClientInfo {

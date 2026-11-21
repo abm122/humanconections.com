@@ -25,6 +25,7 @@ import {
 } from 'firebase/firestore';
 import {
   AUTHORIZED_OWNER_EMAIL,
+  FIREBASE_PROJECT_ID,
   OperationType,
   auth,
   db,
@@ -136,6 +137,41 @@ class FirebasePersistenceService {
     return isAuthorizedFirebaseAdmin(this.currentUser);
   }
 
+  public formatFirebaseError(err: unknown): string {
+    const rawMsg = err instanceof Error ? err.message : String(err || 'Ukjent Firebase-feil');
+    const rawCode =
+      typeof err === 'object' && err !== null && 'code' in err
+        ? String((err as { code?: unknown }).code || '')
+        : '';
+    const codeMatch = rawMsg.match(/\((auth\/[a-z0-9-]+)\)/i);
+    const code = rawCode || (codeMatch ? codeMatch[1] : '');
+    const host = typeof window !== 'undefined' ? window.location.hostname : '';
+
+    if (code === 'auth/unauthorized-domain' || rawMsg.includes('unauthorized-domain')) {
+      return `Domenet «${host || 'denne adressen'}» er ikke godkjent i Firebase-prosjektet «${FIREBASE_PROJECT_ID}» (${code || 'auth/unauthorized-domain'}). Legg til «${host}» under Authentication → Settings → Authorized domains i Firebase Console for prosjektet «${FIREBASE_PROJECT_ID}».`;
+    }
+    if (code === 'auth/popup-blocked' || rawMsg.includes('popup-blocked')) {
+      return `Nettleseren blokkerte Google-innloggingsvinduet (${code || 'auth/popup-blocked'}). Tillat sprettoppvinduer (pop-ups) for denne siden, eller åpne appen i en egen fane og prøv igjen.`;
+    }
+    if (
+      code === 'auth/popup-closed-by-user' ||
+      code === 'auth/cancelled-popup-request' ||
+      rawMsg.includes('popup-closed-by-user')
+    ) {
+      return `Innloggingsvinduet ble lukket før Google-påloggingen ble fullført (${code || 'auth/popup-closed-by-user'}). Prøv igjen og fullfør innloggingen.`;
+    }
+    if (code === 'auth/operation-not-allowed' || rawMsg.includes('operation-not-allowed')) {
+      return `Google-innlogging er ikke skrudd på i Firebase-prosjektet «${FIREBASE_PROJECT_ID}» (${code || 'auth/operation-not-allowed'}). Gå til Authentication → Sign-in method i Firebase Console og aktiver Google.`;
+    }
+    if (code === 'auth/network-request-failed' || rawMsg.includes('network-request-failed')) {
+      return `Nettverksfeil mot Firebase (${code || 'auth/network-request-failed'}). Sjekk internettforbindelsen eller om nettleserutvidelser blokkerer Google/Firebase.`;
+    }
+    if (rawMsg.toLowerCase().includes('missing or insufficient permissions') || rawMsg.toLowerCase().includes('permission-denied')) {
+      return `Manglende Firestore-rettigheter i prosjektet «${FIREBASE_PROJECT_ID}» (permission-denied). Kontroller at du er logget inn som ${AUTHORIZED_OWNER_EMAIL} og at databasereglene er publisert.`;
+    }
+    return `${rawMsg} [Prosjekt: ${FIREBASE_PROJECT_ID}${host ? `, domene: ${host}` : ''}]`;
+  }
+
   public async signInOwnerWithGoogle(): Promise<{
     success: boolean;
     user?: User;
@@ -158,8 +194,7 @@ class FirebasePersistenceService {
       this.notifyAuth();
       return { success: true, user };
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Kunne ikke logge inn med Google.';
-      return { success: false, error: message };
+      return { success: false, error: this.formatFirebaseError(err) };
     }
   }
 
