@@ -3,24 +3,35 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { CalledBall, Player, BingoTheme } from '../types/bingo';
 import { sounds } from '../audio/soundEngine';
 import { BallCageCanvas } from './BallCageCanvas';
 import { RilMusicPlayer } from './RilMusicPlayer';
+import { LanguageSelector } from './LanguageSelector';
 import { authService } from '../services/authService';
 import { sessionTimer } from '../services/sessionTimer';
 import { ownerControl } from '../services/ownerControl';
 import { remoteBingo, RemoteParticipant, RemoteBingoClaim, BingoTvPlayerSummary } from '../services/remoteBingo';
+import { QuizEdition } from '../data/quizQuestions';
+import { MUSIC_BINGO_SONGS, MusicBingoSong } from '../data/musicBingoSongs';
+import { musicBingoService, MusicBingoSnapshot } from '../services/musicBingoService';
+import { musicClipPlayer, MusicClipPlayerState } from '../services/musicClipPlayer';
 
-export type AudienceViewOption = 'multiplayer_ril' | 'split_show' | 'flashboard' | 'stories' | 'leaderboard';
+export type AudienceViewOption =
+  | 'multiplayer_ril'
+  | 'music_bingo'
+  | 'split_show'
+  | 'flashboard'
+  | 'stories'
+  | 'leaderboard';
 
 interface AudienceDisplayModalProps {
   isOpen: boolean;
   onClose: () => void;
   calledBalls: CalledBall[];
   uncalledBalls: CalledBall[];
-  onDrawNextBall: () => void;
+  onDrawNextBall: (ball?: CalledBall) => void;
   players: Player[];
   roomName?: string;
   activeTheme?: BingoTheme;
@@ -28,6 +39,8 @@ interface AudienceDisplayModalProps {
   onAgitateMix?: () => void;
   onOpenRemoteBingo?: () => void;
   onOpenTvMode?: (game: 'bingo' | 'quiz', code: string) => void;
+  onOpenQuiz?: (edition?: QuizEdition, tab?: 'host' | 'big_screen' | 'team_play' | 'join') => void;
+  onOpenPrintCards?: (mode?: 'music_bingo' | 'numbers' | 'both' | 'prompts', count?: number) => void;
   onStartNewRound?: () => void;
   onRefillDrum?: () => void;
   canControlDraw?: boolean;
@@ -46,12 +59,15 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
   onAgitateMix,
   onOpenRemoteBingo,
   onOpenTvMode,
+  onOpenQuiz,
+  onOpenPrintCards,
   onStartNewRound,
   onRefillDrum,
   canControlDraw = true,
 }) => {
   const [viewOption, setViewOption] = useState<AudienceViewOption>('multiplayer_ril');
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isMuted, setIsMuted] = useState(() => sounds.getMuted());
   const [spotlightPlayerIdx, setSpotlightPlayerIdx] = useState<number | 'all'>('all');
   const [showBlender, setShowBlender] = useState(true);
   const [isAutoCalling, setIsAutoCalling] = useState(false);
@@ -67,7 +83,22 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
   );
   const [roundNumber, setRoundNumber] = useState<number>(() => remoteBingo.getRoundNumber());
   const [activeClaim, setActiveClaim] = useState<RemoteBingoClaim | null>(null);
+  const [storskjermJoinNotice, setStorskjermJoinNotice] = useState<string | null>(null);
   const [copiedTvLink, setCopiedTvLink] = useState<boolean>(false);
+
+  // Music Bingo (Eldre / Stor sal 50+ / Videosamtale) state
+  const [musicSnap, setMusicSnap] = useState<MusicBingoSnapshot>(() => musicBingoService.getSnapshot());
+  const [musicClipDuration, setMusicClipDuration] = useState<number>(30);
+  const [musicRemainingSec, setMusicRemainingSec] = useState<number>(0);
+  const [musicSearch, setMusicSearch] = useState<string>('');
+  const [musicCategoryFilter, setMusicCategoryFilter] = useState<string>('Alle');
+  const [hideMusicTitleUntilReveal, setHideMusicTitleUntilReveal] = useState<boolean>(true);
+  const [copiedMusicJoinLink, setCopiedMusicJoinLink] = useState<boolean>(false);
+  const [clipPlayer, setClipPlayer] = useState<MusicClipPlayerState>(() => musicClipPlayer.getState());
+  const [bulkMatchMessage, setBulkMatchMessage] = useState<string | null>(null);
+  const bulkFileInputRef = useRef<HTMLInputElement | null>(null);
+  const singleSongFileInputRef = useRef<HTMLInputElement | null>(null);
+  const pendingUploadSongIdRef = useRef<string | null>(null);
 
   const authUser = authService.getCurrentUser();
   const isOwner = authUser.role === 'owner' || ownerControl.isUnlocked();
@@ -93,16 +124,46 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
     const unsubClaim = remoteBingo.onClaim((claim) => {
       setActiveClaim(claim);
     });
+    const unsubJoin = remoteBingo.onParticipantJoined((p, total) => {
+      sounds.playPop(1.25);
+      setStorskjermJoinNotice(`👋 ${p.name} ble med i rommet (${p.game || 'Avstandsbingo'})! (${total} tilkoblet)`);
+      window.setTimeout(() => setStorskjermJoinNotice(null), 5500);
+    });
     const unsubNewRound = remoteBingo.onNewRound(() => {
       setActiveClaim(null);
       setRoundNumber(remoteBingo.getRoundNumber());
     });
+    const unsubMusic = musicBingoService.subscribe(() => {
+      setMusicSnap(musicBingoService.getSnapshot());
+    });
+    const unsubClip = musicClipPlayer.subscribe(() => {
+      setClipPlayer(musicClipPlayer.getState());
+    });
     return () => {
       unsub();
       unsubClaim();
+      unsubJoin();
       unsubNewRound();
+      unsubMusic();
+      unsubClip();
     };
   }, []);
+
+  useEffect(() => {
+    if (!isOpen || viewOption !== 'music_bingo') {
+      musicClipPlayer.stop();
+      return;
+    }
+    if (canActAsHost && !musicSnap.isActive) {
+      musicBingoService.ensureHostActive(hostDisplayName);
+    }
+    const tick = () => {
+      setMusicRemainingSec(musicBingoService.getRemainingClipSeconds());
+    };
+    tick();
+    const timer = setInterval(tick, 250);
+    return () => clearInterval(timer);
+  }, [isOpen, viewOption, canActAsHost, hostDisplayName, musicSnap.isActive, musicSnap.clipStartedAt, musicSnap.clipDurationSec]);
 
   useEffect(() => {
     if (isOpen && canActAsHost) {
@@ -298,6 +359,24 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
               <button
                 onClick={() => {
                   sounds.playClick();
+                  setViewOption('music_bingo');
+                  if (canActAsHost) {
+                    musicBingoService.ensureHostActive(hostDisplayName);
+                  }
+                }}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 whitespace-nowrap ${
+                  viewOption === 'music_bingo'
+                    ? 'bg-gradient-to-r from-amber-400 to-rose-400 text-slate-950 shadow-md font-black'
+                    : 'text-rose-200 hover:text-white bg-rose-500/15 border border-rose-400/35'
+                }`}
+              >
+                <span>🎵</span>
+                <span>Musikkbingo (50+)</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  sounds.playClick();
                   setViewOption('split_show');
                 }}
                 className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
@@ -447,6 +526,37 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
               </button>
             )}
 
+            {onOpenQuiz && (
+              <button
+                type="button"
+                onClick={() => {
+                  sounds.playClick();
+                  onClose();
+                  onOpenQuiz('senior', canActAsHost ? 'host' : 'join');
+                }}
+                className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-amber-300 to-emerald-400 hover:brightness-110 text-slate-950 text-xs font-black cursor-pointer flex items-center gap-1.5 shadow whitespace-nowrap"
+                title="Åpne blandet Musikk-gjetting & Senior Grenland Quiz (tilfeldig rekkefølge, flervalg A–D + Skriv-svar, 4–5 per skjerm)"
+              >
+                <span>👵🎵</span>
+                <span>Senior Grenland Quiz</span>
+              </button>
+            )}
+
+            <LanguageSelector variant="compact" />
+
+            <button
+              type="button"
+              onClick={() => {
+                const m = sounds.toggleMute();
+                setIsMuted(m);
+              }}
+              aria-label={isMuted ? 'Slå på lyd og stemme' : 'Demp lyd og stemme'}
+              title={isMuted ? 'Slå på opplesing og lyd' : 'Demp opplesing og lyd'}
+              className="px-2.5 py-1.5 rounded-xl bg-amber-950/70 border border-amber-500/30 hover:border-amber-400 text-amber-200 text-xs font-bold cursor-pointer shadow whitespace-nowrap"
+            >
+              {isMuted ? '🔇' : '🔊'}
+            </button>
+
             {/* RIL Pausemusikk for Storskjerm */}
             <RilMusicPlayer variant="compact" />
 
@@ -482,29 +592,70 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
         </div>
       </header>
 
-      {/* Fullbrett Bingo Claim Celebration Banner + Audience Roster Bar */}
+      {/* Fullbrett Bingo Claim Celebration Banner + Join Notice + Audience Roster Bar */}
       <div className="max-w-[1880px] mx-auto w-full mt-3 space-y-2.5">
-        {activeClaim && (
-          <div className="p-4 rounded-2xl bg-gradient-to-r from-amber-500 via-rose-500 to-amber-500 text-white shadow-2xl border-2 border-white flex flex-wrap items-center justify-between gap-3 animate-pulse">
-            <div className="font-heading font-black text-base sm:text-xl">
-              🎉 {activeClaim.isFullHouse ? 'FULLBRETT BINGO FRA' : 'BINGO ROP FRA'}{' '}
-              {activeClaim.playerName.toUpperCase()}!{' '}
-              {activeClaim.isFullHouse && '· 🔄 Ny runde starter straks!'}
-            </div>
-            {canActAsHost && onStartNewRound && (
-              <button
-                type="button"
-                onClick={() => {
-                  sounds.playLineComplete();
-                  onStartNewRound();
-                }}
-                className="px-4 py-2 rounded-xl bg-white text-slate-950 font-black text-xs cursor-pointer shadow"
-              >
-                🔄 Start ny runde nå
-              </button>
-            )}
+        {storskjermJoinNotice && (
+          <div className="px-4 py-2.5 rounded-2xl bg-gradient-to-r from-emerald-500/30 via-teal-500/25 to-cyan-500/25 border border-emerald-400 text-emerald-100 text-xs sm:text-sm font-black flex items-center justify-between gap-2 shadow-lg">
+            <span>{storskjermJoinNotice}</span>
+            <button
+              type="button"
+              onClick={() => setStorskjermJoinNotice(null)}
+              className="text-emerald-200 hover:text-white font-black cursor-pointer shrink-0"
+            >
+              ✕
+            </button>
           </div>
         )}
+
+        {activeClaim && (() => {
+          const tier =
+            activeClaim.milestone ||
+            (activeClaim.isFullHouse || /fullbrett|fullt?\s*brett/i.test(activeClaim.pattern)
+              ? 'fullbrett'
+              : /3\s*\.?\s*rekke/i.test(activeClaim.pattern)
+              ? 'line3'
+              : 'line1');
+          const tierText = tier === 'fullbrett' ? 'FULLT BRETT' : tier === 'line3' ? '3. REKKER' : '1. REKKE';
+          const nextText =
+            tier === 'fullbrett'
+              ? '🔄 Ny runde starter straks!'
+              : tier === 'line3'
+              ? '➡️ Vi spiller videre til FULL BRETT!'
+              : '➡️ Vi spiller videre til 3. REKKER!';
+          return (
+            <div className="p-4 rounded-2xl bg-gradient-to-r from-amber-500 via-rose-500 to-amber-500 text-white shadow-2xl border-2 border-white flex flex-wrap items-center justify-between gap-3">
+              <div className="space-y-0.5">
+                <div className="font-heading font-black text-base sm:text-xl">
+                  🏆 {activeClaim.playerName.toUpperCase()} HAR FYLT {tierText} OG TRYKKET BINGO!
+                </div>
+                <div className="text-xs sm:text-sm font-black text-amber-50">
+                  {nextText}
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                {canActAsHost && onStartNewRound && activeClaim.isFullHouse && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      sounds.playLineComplete();
+                      onStartNewRound();
+                    }}
+                    className="px-4 py-2 rounded-xl bg-white text-slate-950 font-black text-xs cursor-pointer shadow"
+                  >
+                    🔄 Start ny runde nå
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setActiveClaim(null)}
+                  className="px-3 py-2 rounded-xl bg-black/40 hover:bg-black/60 text-white font-black text-xs cursor-pointer"
+                >
+                  OK
+                </button>
+              </div>
+            </div>
+          );
+        })()}
 
         <div className="px-4 py-2.5 rounded-2xl bg-black/55 border border-amber-500/30 flex flex-wrap items-center justify-between gap-2">
           <div className="flex flex-wrap items-center gap-2">
@@ -557,15 +708,793 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
         </div>
       </div>
 
+      {/* VIEW OPTION: DIGITAL MUSIKKBINGO FOR ELDRE & STOR SAL (50+ PERSONER / VIDEOSAMTALE) */}
+      {viewOption === 'music_bingo' && (() => {
+        const currentSong: MusicBingoSong | null = musicBingoService.getSongById(musicSnap.currentSongId);
+        const playedSongs: MusicBingoSong[] = [...musicSnap.playedSongIds]
+          .reverse()
+          .map((id) => MUSIC_BINGO_SONGS.find((s) => s.id === id))
+          .filter((s): s is MusicBingoSong => Boolean(s));
+        const categories = ['Alle', ...Array.from(new Set(MUSIC_BINGO_SONGS.map((s) => s.category)))];
+        const searchLower = musicSearch.trim().toLowerCase();
+        const filteredDeck = MUSIC_BINGO_SONGS.filter((s) => {
+          if (musicCategoryFilter !== 'Alle' && s.category !== musicCategoryFilter) return false;
+          if (!searchLower) return true;
+          return (
+            s.title.toLowerCase().includes(searchLower) ||
+            s.artist.toLowerCase().includes(searchLower) ||
+            s.decade.toLowerCase().includes(searchLower)
+          );
+        });
+        const activeClipMaxSec = musicSnap.clipDurationSec || musicClipDuration;
+        const clipProgressPct =
+          activeClipMaxSec > 0 && musicSnap.clipStartedAt > 0
+            ? Math.max(0, Math.min(100, (musicRemainingSec / activeClipMaxSec) * 100))
+            : 0;
+        const effectiveRoomCode = musicSnap.roomCode || hostCode || '';
+
+        return (
+          <div className="flex-1 max-w-[1880px] mx-auto w-full py-4 flex flex-col lg:flex-row items-start gap-5">
+            {/* LEFT COLUMN: Host Song Console, Spotify Clips, Clip Timer & Video/Hall Guide */}
+            <aside className="w-full lg:w-[440px] xl:w-[470px] shrink-0 space-y-3.5">
+              {/* Video Call & 50+ Hall Setup Card */}
+              <div className="p-4 rounded-2xl bg-gradient-to-br from-[#28150c] via-[#1a0f08] to-black/90 border-2 border-amber-400/50 space-y-3 shadow-xl">
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <div className="text-xs font-black uppercase tracking-wider text-amber-300">
+                      🎵 Digital Musikkbingo · Runde {musicSnap.roundNumber}
+                    </div>
+                    <h2 className="font-heading font-black text-base sm:text-lg text-white">
+                      Eldre &amp; Stor Sal (50+ personer)
+                    </h2>
+                  </div>
+                  {effectiveRoomCode && (
+                    <span className="px-2.5 py-1 rounded-xl bg-cyan-950 border border-cyan-400/60 text-cyan-200 font-mono font-black text-xs shrink-0">
+                      Kode: {effectiveRoomCode}
+                    </span>
+                  )}
+                </div>
+
+                <div className="p-3 rounded-xl bg-black/55 border border-amber-500/25 text-xs text-amber-100/90 space-y-1.5 leading-relaxed">
+                  <div>
+                    🔊 <strong>Stor sal (50+ stk):</strong> Koble PC eller nettbrett til salens høyttalere/lydanlegg, og styr alle lydklipp (20, 30, 60 eller 90 sek) direkte i appen via lydfil-knappene under.
+                  </div>
+                  <div>
+                    💻 <strong>Videosamtale:</strong> Spill lydklippene direkte her inne i appen gjennom PC-ens lyd/høyttaler (eller velg nettleserfane-deling hvis videosamtalen din støtter fane-lyd).
+                  </div>
+                </div>
+
+                {/* Quick Hall Actions: Print 50-100 Cards & Copy Digital Board Link */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {onOpenPrintCards && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        sounds.playClick();
+                        onOpenPrintCards('music_bingo', 50);
+                      }}
+                      className="min-h-[44px] px-3 py-2 rounded-xl bg-white hover:bg-amber-100 text-slate-950 font-black text-xs cursor-pointer shadow flex items-center justify-center gap-1.5"
+                    >
+                      <span>🖨️</span>
+                      <span>Skriv ut 50–100 brett</span>
+                    </button>
+                  )}
+
+                  {effectiveRoomCode && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        sounds.playClick();
+                        const shareUrl = `${window.location.origin}/?spill=bingo&kode=${encodeURIComponent(effectiveRoomCode)}`;
+                        navigator.clipboard?.writeText(shareUrl).catch(() => {});
+                        setCopiedMusicJoinLink(true);
+                        setTimeout(() => setCopiedMusicJoinLink(false), 2200);
+                      }}
+                      className="min-h-[44px] px-3 py-2 rounded-xl bg-cyan-500/25 hover:bg-cyan-500/35 border border-cyan-400/60 text-cyan-100 font-black text-xs cursor-pointer flex items-center justify-center gap-1.5"
+                    >
+                      <span>📱</span>
+                      <span>{copiedMusicJoinLink ? '✓ Lenke kopiert!' : 'Lenke til digitale brett'}</span>
+                    </button>
+                  )}
+                </div>
+
+                {onOpenQuiz && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      sounds.playClick();
+                      onClose();
+                      onOpenQuiz('senior', canActAsHost ? 'host' : 'join');
+                    }}
+                    className="w-full min-h-[44px] px-3 py-2 rounded-xl bg-gradient-to-r from-amber-400/20 to-emerald-400/20 hover:from-amber-400/30 hover:to-emerald-400/30 border border-amber-400/50 text-amber-100 font-black text-xs cursor-pointer flex items-center justify-center gap-2"
+                  >
+                    <span>👵🎵</span>
+                    <span>Spill blandet Musikk-gjetting + Senior Grenland Quiz (A–D &amp; Skriv-svar)</span>
+                    <span>➔</span>
+                  </button>
+                )}
+              </div>
+
+              {/* Hidden File Inputs for Host-Managed Audio Clips */}
+              {canActAsHost && (
+                <>
+                  <input
+                    ref={singleSongFileInputRef}
+                    type="file"
+                    accept="audio/*,.mp3,.m4a,.wav,.ogg,.aac"
+                    className="hidden"
+                    onChange={async (e) => {
+                      const file = e.target.files?.[0];
+                      const targetId = pendingUploadSongIdRef.current;
+                      e.target.value = '';
+                      if (!file || !targetId) return;
+                      await musicClipPlayer.saveSongAudioFile(targetId, file);
+                      const targetSong = MUSIC_BINGO_SONGS.find((s) => s.id === targetId);
+                      if (targetSong && musicSnap.currentSongId === targetId) {
+                        void musicClipPlayer.playSongClip(targetSong, musicClipDuration);
+                      }
+                    }}
+                  />
+                  <input
+                    ref={bulkFileInputRef}
+                    type="file"
+                    multiple
+                    accept="audio/*,.mp3,.m4a,.wav,.ogg,.aac"
+                    className="hidden"
+                    onChange={async (e) => {
+                      const files = e.target.files;
+                      if (!files || files.length === 0) return;
+                      const res = await musicClipPlayer.bulkMatchAudioFiles(files);
+                      e.target.value = '';
+                      if (res.matched.length > 0) {
+                        setBulkMatchMessage(
+                          `✓ Koblet ${res.matched.length} lydfil(er) til sanger i appen${
+                            res.unmatched.length > 0 ? ` (${res.unmatched.length} kunne ikke gjenkjennes automatisk — velg sangen manuelt med «📁 Lydfil»)` : '!'
+                          }`
+                        );
+                      } else {
+                        setBulkMatchMessage(
+                          'Fant ingen direkte tittel-treff i filnavnet. Klikk «📁 Lydfil» direkte på ønsket sang under for å knytte lydfilen.'
+                        );
+                      }
+                      setTimeout(() => setBulkMatchMessage(null), 6500);
+                    }}
+                  />
+                </>
+              )}
+
+              {/* Host Playback & Clip Timer Controls */}
+              {canActAsHost && (
+                <div className="p-4 rounded-2xl bg-black/65 border border-amber-500/35 space-y-3 shadow-xl">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      sounds.playPop(1.1);
+                      const picked = musicBingoService.drawRandomNextSong(!hideMusicTitleUntilReveal, musicClipDuration);
+                      if (picked) {
+                        void musicClipPlayer.playSongClip(picked, musicClipDuration);
+                      }
+                    }}
+                    disabled={musicSnap.playedSongIds.length >= MUSIC_BINGO_SONGS.length}
+                    className="w-full min-h-[48px] py-3 px-4 rounded-xl bg-gradient-to-r from-amber-400 via-amber-500 to-rose-400 hover:brightness-110 active:scale-[0.99] text-slate-950 font-black text-sm cursor-pointer shadow-lg disabled:opacity-45 flex items-center justify-center gap-2"
+                  >
+                    <span>🎲</span>
+                    <span>
+                      Trekk &amp; spill neste sang ({MUSIC_BINGO_SONGS.length - musicSnap.playedSongIds.length} igjen av {MUSIC_BINGO_SONGS.length})
+                    </span>
+                  </button>
+
+                  {currentSong && (() => {
+                    const isThisPlaying = clipPlayer.currentSongId === currentSong.id && clipPlayer.isPlaying;
+                    const isThisLoading = clipPlayer.currentSongId === currentSong.id && clipPlayer.isLoading;
+                    const customClip = clipPlayer.customClips[currentSong.id];
+                    const audioPct =
+                      clipPlayer.durationSec > 0
+                        ? Math.min(100, Math.max(0, (clipPlayer.currentTimeSec / clipPlayer.durationSec) * 100))
+                        : 0;
+                    const fmtSec = (s: number) => {
+                      const whole = Math.max(0, Math.floor(s));
+                      return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, '0')}`;
+                    };
+
+                    return (
+                      <div className="p-3 rounded-2xl bg-emerald-950/35 border border-emerald-400/50 space-y-2.5">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (isThisPlaying) {
+                                musicClipPlayer.togglePlayPause();
+                              } else {
+                                if (musicRemainingSec <= 0) {
+                                  musicBingoService.startClipTimer(musicClipDuration);
+                                }
+                                void musicClipPlayer.playSongClip(currentSong, musicClipDuration);
+                              }
+                            }}
+                            disabled={isThisLoading}
+                            className={`flex-1 min-h-[44px] py-2 px-3 rounded-xl font-black text-xs sm:text-sm shadow cursor-pointer flex items-center justify-center gap-2 transition-all ${
+                              isThisPlaying
+                                ? 'bg-amber-400 hover:bg-amber-300 text-slate-950'
+                                : 'bg-emerald-400 hover:bg-emerald-300 text-slate-950'
+                            }`}
+                          >
+                            <span>{isThisLoading ? '⏳' : isThisPlaying ? '⏸️' : '▶️'}</span>
+                            <span className="truncate">
+                              {isThisLoading
+                                ? 'Laster lydklipp...'
+                                : isThisPlaying
+                                ? `Pause klipp: «${currentSong.title}»`
+                                : `Spill klipp i appen: «${currentSong.title}»`}
+                            </span>
+                          </button>
+
+                          {(isThisPlaying || clipPlayer.currentSongId === currentSong.id) && clipPlayer.currentTimeSec > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => musicClipPlayer.stop()}
+                              className="min-h-[44px] px-3 rounded-xl bg-rose-500/25 hover:bg-rose-500/40 border border-rose-400/50 text-rose-100 font-black text-xs cursor-pointer"
+                              title="Stopp lydavspilling"
+                            >
+                              ⏹️ Stopp
+                            </button>
+                          )}
+                        </div>
+
+                        {/* Progress + Volume */}
+                        {clipPlayer.currentSongId === currentSong.id && clipPlayer.durationSec > 0 && (
+                          <div className="space-y-1">
+                            <input
+                              type="range"
+                              min={0}
+                              max={Math.max(1, Math.floor(clipPlayer.durationSec))}
+                              value={Math.floor(clipPlayer.currentTimeSec)}
+                              onChange={(e) => musicClipPlayer.seekTo(Number(e.target.value))}
+                              className="w-full accent-emerald-400 cursor-pointer h-1.5"
+                              aria-label="Spol i lydklipp"
+                            />
+                            <div className="flex items-center justify-between text-[11px] font-mono text-emerald-200/90">
+                              <span>{clipPlayer.sourceLabel || 'Lydklipp'}</span>
+                              <span>
+                                {fmtSec(clipPlayer.currentTimeSec)} / {fmtSec(clipPlayer.durationSec)} ({Math.round(audioPct)}%)
+                              </span>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Volume & Organizer Custom Audio File Management */}
+                        <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-white/10">
+                          <div className="flex items-center gap-1.5 text-xs">
+                            <span>🔊</span>
+                            <input
+                              type="range"
+                              min={0}
+                              max={100}
+                              value={Math.round(clipPlayer.volume * 100)}
+                              onChange={(e) => musicClipPlayer.setVolume(Number(e.target.value) / 100)}
+                              className="w-20 accent-amber-400 cursor-pointer h-1.5"
+                              title={`Lydstyrke: ${Math.round(clipPlayer.volume * 100)}%`}
+                            />
+                            <span className="text-[11px] font-mono text-amber-200/80 w-8">
+                              {Math.round(clipPlayer.volume * 100)}%
+                            </span>
+                          </div>
+
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                pendingUploadSongIdRef.current = currentSong.id;
+                                singleSongFileInputRef.current?.click();
+                              }}
+                              className="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 border border-white/20 text-[11px] font-bold text-amber-100 cursor-pointer"
+                              title="Last opp din egen MP3/M4A/WAV-lydfil til denne sangen"
+                            >
+                              📁 {customClip ? 'Bytt lydfil' : 'Last opp egen lydfil'}
+                            </button>
+
+                            {customClip && (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const nextOffset = (customClip.startOffsetSec + 15) % 90;
+                                    void musicClipPlayer.setSongStartOffset(currentSong.id, nextOffset);
+                                  }}
+                                  className="px-2 py-1 rounded-lg bg-cyan-500/20 border border-cyan-400/40 text-cyan-200 text-[11px] font-mono font-bold cursor-pointer"
+                                  title="Juster startpunkt i egen lydfil (hopp til refreng)"
+                                >
+                                  ⏩ Start: {customClip.startOffsetSec}s
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => void musicClipPlayer.removeSongAudioFile(currentSong.id)}
+                                  className="px-2 py-1 rounded-lg bg-rose-500/20 border border-rose-400/40 text-rose-200 text-[11px] font-bold cursor-pointer"
+                                  title="Fjern egen lydfil"
+                                >
+                                  🗑️
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        </div>
+
+                        {clipPlayer.notice && (
+                          <div className="p-2 rounded-lg bg-amber-500/15 border border-amber-400/40 text-[11px] text-amber-100 flex items-center justify-between gap-2">
+                            <span>{clipPlayer.notice}</span>
+                            <button
+                              type="button"
+                              onClick={() => musicClipPlayer.clearNotice()}
+                              className="text-amber-300 hover:text-white font-bold cursor-pointer shrink-0"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+
+                  {/* Clip duration & Timer controls */}
+                  <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                    <div className="flex items-center gap-1">
+                      <span className="text-[11px] font-bold text-amber-300/80 mr-1">Klipp:</span>
+                      {[20, 30, 60, 90].map((sec) => (
+                        <button
+                          key={sec}
+                          type="button"
+                          onClick={() => {
+                            sounds.playClick();
+                            setMusicClipDuration(sec);
+                          }}
+                          className={`px-2.5 py-1 rounded-lg text-xs font-black cursor-pointer border ${
+                            musicClipDuration === sec
+                              ? 'bg-amber-400 text-slate-950 border-white'
+                              : 'bg-white/5 text-amber-200 border-white/15 hover:bg-white/10'
+                          }`}
+                        >
+                          {sec}s
+                        </button>
+                      ))}
+                    </div>
+
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          sounds.playClick();
+                          musicBingoService.startClipTimer(musicClipDuration);
+                          if (currentSong) {
+                            void musicClipPlayer.playSongClip(currentSong, musicClipDuration);
+                          }
+                        }}
+                        className="px-3 py-1.5 rounded-lg bg-emerald-500/25 hover:bg-emerald-500/35 border border-emerald-400/50 text-emerald-100 text-xs font-bold cursor-pointer"
+                      >
+                        ⏱️ Start klokka
+                      </button>
+                      {musicRemainingSec > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            sounds.playClick();
+                            musicBingoService.stopClipTimer();
+                            musicClipPlayer.stop();
+                          }}
+                          className="px-2.5 py-1.5 rounded-lg bg-rose-500/25 border border-rose-400/50 text-rose-200 text-xs font-bold cursor-pointer"
+                        >
+                          ⏹️
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Guess Mode vs Reveal Title Toggle + New Round (Kun Arrangør) */}
+                  <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-white/10">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        sounds.playClick();
+                        const nextHide = !hideMusicTitleUntilReveal;
+                        setHideMusicTitleUntilReveal(nextHide);
+                        musicBingoService.setRevealCurrentSong(!nextHide);
+                      }}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold cursor-pointer border ${
+                        hideMusicTitleUntilReveal
+                          ? 'bg-amber-950/70 border-amber-400/50 text-amber-200'
+                          : 'bg-emerald-500/25 border-emerald-400 text-emerald-100'
+                      }`}
+                    >
+                      {hideMusicTitleUntilReveal
+                        ? '🙈 Gjettemodus PÅ (Skjuler tittel først)'
+                        : '👁️ Viser tittel umiddelbart'}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        sounds.playPop(1.1);
+                        musicClipPlayer.stop();
+                        musicBingoService.startNewRound();
+                      }}
+                      className="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 text-xs font-bold text-amber-100 cursor-pointer"
+                    >
+                      🔄 Ny Musikkrunde
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Searchable 60-Song Nostalgic Deck with In-App Playable Clip Buttons */}
+              {canActAsHost && (
+                <div className="p-4 rounded-2xl bg-black/65 border border-amber-500/30 space-y-2.5 shadow-xl">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <h3 className="font-heading font-black text-sm text-amber-200">
+                        🎶 Lydfiler &amp; sanger i appen ({filteredDeck.length})
+                      </h3>
+                      <div className="text-[11px] text-amber-200/70">
+                        {Object.keys(clipPlayer.customClips).length}/{MUSIC_BINGO_SONGS.length} egne lydfiler lastet opp · {musicSnap.playedSongIds.length} spilt
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => bulkFileInputRef.current?.click()}
+                      className="px-2.5 py-1.5 rounded-xl bg-cyan-500/25 hover:bg-cyan-500/35 border border-cyan-400/50 text-cyan-100 font-black text-[11px] cursor-pointer"
+                      title="Last opp flere MP3/M4A/WAV-filer samtidig og koble dem automatisk til sanglisten"
+                    >
+                      📂 Last opp egne lydfiler
+                    </button>
+                  </div>
+
+                  {bulkMatchMessage && (
+                    <div className="p-2.5 rounded-xl bg-emerald-500/20 border border-emerald-400/50 text-[11px] text-emerald-100 font-bold">
+                      {bulkMatchMessage}
+                    </div>
+                  )}
+
+                  <input
+                    type="text"
+                    value={musicSearch}
+                    onChange={(e) => setMusicSearch(e.target.value)}
+                    placeholder="Søk etter sang, artist eller tiår (f.eks. Prøysen, 1960)..."
+                    className="w-full px-3 py-2 rounded-xl bg-black/70 border border-white/20 focus:border-amber-400 text-xs text-white outline-none"
+                  />
+
+                  <div className="flex items-center gap-1 overflow-x-auto no-scrollbar pb-1">
+                    {categories.map((cat) => (
+                      <button
+                        key={cat}
+                        type="button"
+                        onClick={() => {
+                          sounds.playClick();
+                          setMusicCategoryFilter(cat);
+                        }}
+                        className={`px-2.5 py-1 rounded-lg text-[11px] font-bold whitespace-nowrap cursor-pointer ${
+                          musicCategoryFilter === cat
+                            ? 'bg-amber-400 text-slate-950 font-black'
+                            : 'bg-white/5 text-amber-200/80 hover:bg-white/10'
+                        }`}
+                      >
+                        {cat}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="max-h-72 overflow-y-auto space-y-1.5 pr-1">
+                    {filteredDeck.map((song) => {
+                      const isPlayed = musicSnap.playedSongIds.includes(song.id);
+                      const isCurrent = musicSnap.currentSongId === song.id;
+                      const isSongPlaying = clipPlayer.currentSongId === song.id && clipPlayer.isPlaying;
+                      const isSongLoading = clipPlayer.currentSongId === song.id && clipPlayer.isLoading;
+                      const hasCustomAudio = Boolean(clipPlayer.customClips[song.id]);
+                      return (
+                        <div
+                          key={song.id}
+                          className={`p-2.5 rounded-xl border flex items-center justify-between gap-2 text-xs ${
+                            isSongPlaying || isCurrent
+                              ? 'bg-amber-500/25 border-amber-400 text-white'
+                              : isPlayed
+                              ? 'bg-emerald-950/35 border-emerald-500/30 text-emerald-100/80'
+                              : 'bg-white/5 border-white/10 text-amber-50'
+                          }`}
+                        >
+                          <div className="min-w-0 flex-1">
+                            <div className="font-bold truncate">
+                              {isPlayed && <span className="text-emerald-300 mr-1">✓</span>}
+                              {song.title}
+                            </div>
+                            <div className="text-[11px] text-amber-200/75 truncate">
+                              {song.artist} · {song.decade}
+                              {hasCustomAudio && (
+                                <span className="ml-1.5 text-emerald-300 font-bold">· ✓ Egen lydfil</span>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                sounds.playClick();
+                                pendingUploadSongIdRef.current = song.id;
+                                singleSongFileInputRef.current?.click();
+                              }}
+                              className={`px-2 py-1.5 rounded-lg border text-[11px] font-bold cursor-pointer ${
+                                hasCustomAudio
+                                  ? 'bg-emerald-500/25 border-emerald-400/60 text-emerald-100 hover:bg-emerald-500/35'
+                                  : 'bg-white/10 border-white/20 text-amber-100 hover:bg-white/20'
+                              }`}
+                              title={
+                                hasCustomAudio
+                                  ? `Bytt lydfil (${clipPlayer.customClips[song.id].fileName})`
+                                  : `Last opp lydfil (.mp3/.m4a/.wav) for «${song.title}»`
+                              }
+                            >
+                              {hasCustomAudio ? '✓ Lyd' : '📁 Lydfil'}
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (isSongPlaying) {
+                                  musicClipPlayer.togglePlayPause();
+                                } else {
+                                  sounds.playPop(1.05);
+                                  musicBingoService.playSong(song.id, !hideMusicTitleUntilReveal, musicClipDuration);
+                                  void musicClipPlayer.playSongClip(song, musicClipDuration);
+                                }
+                              }}
+                              disabled={isSongLoading}
+                              className={`px-2.5 py-1.5 rounded-lg font-black text-[11px] cursor-pointer ${
+                                isSongPlaying
+                                  ? 'bg-rose-400 hover:bg-rose-300 text-slate-950'
+                                  : 'bg-amber-400 hover:bg-amber-300 text-slate-950'
+                              }`}
+                            >
+                              {isSongLoading ? '⏳' : isSongPlaying ? '⏸️ Pause' : '▶ Spill'}
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </aside>
+
+            {/* RIGHT COLUMN: Big Hall Projector Display (Readable from back of 50+ hall) */}
+            <div className="flex-1 min-w-0 w-full space-y-5">
+              {/* Live Music Bingo Claim Alert */}
+              {musicSnap.lastClaim && (() => {
+                const isFull = /fullt?\s*brett|full_?house|blackout/i.test(musicSnap.lastClaim.pattern);
+                const isLine3 = !isFull && /3\s*\.?\s*rekke/i.test(musicSnap.lastClaim.pattern);
+                const nextMusicText = isFull
+                  ? '🔄 Fullt brett oppnådd — arrangør kan starte ny musikkrunde!'
+                  : isLine3
+                  ? '➡️ Spillet fortsetter nå til FULLT BRETT!'
+                  : '➡️ Spillet fortsetter nå til 3. REKKER!';
+                return (
+                  <div className="p-5 rounded-3xl bg-gradient-to-r from-emerald-500 via-amber-400 to-rose-500 text-slate-950 shadow-2xl border-4 border-white flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <div className="text-xs font-black uppercase tracking-widest">
+                        🎉 BEKREFTET MUSIKKBINGO FRA SALEN / MOBIL!
+                      </div>
+                      <div className="font-display text-2xl sm:text-4xl font-black">
+                        {musicSnap.lastClaim.playerName} har fylt {musicSnap.lastClaim.pattern} og trykket BINGO!
+                      </div>
+                      <div className="text-xs sm:text-sm font-black mt-1">
+                        {nextMusicText}
+                      </div>
+                    </div>
+                    {canActAsHost && (
+                      <button
+                        type="button"
+                        onClick={() => musicBingoService.dismissClaim()}
+                        className="px-4 py-2 rounded-xl bg-slate-950 text-white font-black text-xs cursor-pointer"
+                      >
+                        ✓ Godkjenn &amp; lukk varsel
+                      </button>
+                    )}
+                  </div>
+                );
+              })()}
+
+              {/* Current Song Big Stage Card */}
+              <div className="p-6 sm:p-10 rounded-3xl bg-gradient-to-br from-[#2b180c] via-[#170e0a] to-[#0b0706] border-2 border-amber-400/50 shadow-2xl space-y-6">
+                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-amber-500/20 pb-4">
+                  <div className="flex items-center gap-2.5">
+                    <span className="px-3 py-1 rounded-full bg-amber-400 text-slate-950 font-black text-xs uppercase tracking-wider">
+                      🎵 Musikkbingo Storskjerm
+                    </span>
+                    <span className="text-sm font-bold text-amber-200">
+                      Runde {musicSnap.roundNumber} · {musicSnap.playedSongIds.length} av {MUSIC_BINGO_SONGS.length} sanger spilt
+                    </span>
+                  </div>
+
+                  {musicRemainingSec > 0 && (
+                    <div
+                      className={`px-5 py-2 rounded-2xl border-2 font-mono tabular-nums font-black text-2xl sm:text-3xl ${
+                        musicRemainingSec <= 5
+                          ? 'bg-rose-500/25 border-rose-400 text-rose-200 animate-pulse'
+                          : 'bg-emerald-500/20 border-emerald-400 text-emerald-200'
+                      }`}
+                    >
+                      ⏱️ {musicRemainingSec}s
+                    </div>
+                  )}
+                </div>
+
+                {musicSnap.clipStartedAt > 0 && musicRemainingSec > 0 && (
+                  <div className="w-full h-3.5 rounded-full bg-white/10 overflow-hidden">
+                    <div
+                      className={`h-full transition-all duration-200 ${
+                        musicRemainingSec <= 5 ? 'bg-rose-500' : 'bg-emerald-400'
+                      }`}
+                      style={{ width: `${clipProgressPct}%` }}
+                    />
+                  </div>
+                )}
+
+                {!currentSong ? (
+                  <div className="py-10 text-center space-y-4">
+                    <div className="text-6xl">🎶</div>
+                    <h2 className="font-display text-3xl sm:text-5xl font-black text-amber-100 leading-tight">
+                      Velkommen til Musikkbingo!
+                    </h2>
+                    <p className="text-base sm:text-xl text-amber-200/85 max-w-2xl mx-auto leading-relaxed">
+                      Finn frem papirbrettet eller det digitale brettet på mobil/nettbrett. Når du hører en melodi du kjenner igjen, krysser du av ruten!
+                    </p>
+                  </div>
+                ) : !musicSnap.revealCurrentSong ? (
+                  <div className="py-8 text-center space-y-5">
+                    <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-emerald-500/20 border border-emerald-400 text-emerald-200 text-sm font-black">
+                      <span>🔊</span>
+                      <span>LYD-KLIPP SPILLES NÅ — LYTT &amp; KRYSS AV!</span>
+                    </div>
+                    <h2 className="font-display text-3xl sm:text-5xl font-black text-white leading-tight">
+                      Kjenner du igjen denne låten?
+                    </h2>
+                    <div className="p-4 sm:p-5 rounded-2xl bg-black/50 border border-amber-400/40 max-w-2xl mx-auto space-y-1.5">
+                      <div className="text-sm font-black text-amber-300 uppercase tracking-wider">
+                        Hint til salen: {currentSong.decade} · {currentSong.category}
+                      </div>
+                      <p className="text-base sm:text-lg text-amber-100 font-semibold">
+                        💡 {currentSong.clipHint}
+                      </p>
+                    </div>
+                    {canActAsHost && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          sounds.playLineComplete();
+                          musicBingoService.setRevealCurrentSong(true);
+                        }}
+                        className="px-7 py-4 rounded-2xl bg-gradient-to-r from-emerald-400 to-amber-400 hover:brightness-110 text-slate-950 font-black text-base sm:text-lg cursor-pointer shadow-2xl"
+                      >
+                        👁️ Vis sangtittel &amp; artist på Storskjermen
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <div className="py-6 text-center space-y-4">
+                    <div className="text-xs font-black uppercase tracking-widest text-emerald-300">
+                      ✓ NÅ SPILLER / SISTE SANG ({currentSong.decade} · {currentSong.category})
+                    </div>
+                    <h2 className="font-display text-4xl sm:text-6xl font-black text-white leading-tight">
+                      «{currentSong.title}»
+                    </h2>
+                    <div className="text-xl sm:text-3xl font-heading font-bold text-amber-300">
+                      {currentSong.artist}
+                    </div>
+                    <p className="text-base sm:text-lg text-amber-100/85 max-w-2xl mx-auto">
+                      🎤 {currentSong.clipHint}
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              {/* Played Songs Hall Verification Wall */}
+              <div className="p-5 sm:p-6 rounded-3xl bg-black/60 border border-amber-500/30 space-y-4 shadow-xl">
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/10 pb-3">
+                  <h3 className="font-heading font-black text-lg sm:text-xl text-amber-200">
+                    📋 Spilte sanger i denne runden ({playedSongs.length}) — Sjekk brettet ditt
+                  </h3>
+                  <span className="text-xs font-bold text-amber-300/80">
+                    Nyeste sang øverst
+                  </span>
+                </div>
+
+                {playedSongs.length === 0 ? (
+                  <div className="py-6 text-center text-sm text-amber-200/60">
+                    Ingen sanger er trukket i runden ennå. Verten starter første melodi straks!
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
+                    {playedSongs.map((s, idx) => {
+                      const isLatest = s.id === musicSnap.currentSongId;
+                      if (isLatest && !musicSnap.revealCurrentSong) {
+                        return (
+                          <div
+                            key={s.id}
+                            className="p-4 rounded-2xl bg-amber-500/20 border-2 border-amber-400 flex items-center justify-between gap-2"
+                          >
+                            <div>
+                              <div className="text-xs font-black text-amber-300">
+                                🔊 Spilles nå (Gjettes!)
+                              </div>
+                              <div className="text-base font-bold text-white">
+                                {s.decade} · {s.category}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      }
+                      return (
+                        <div
+                          key={s.id}
+                          className={`p-4 rounded-2xl border flex items-center justify-between gap-3 ${
+                            isLatest
+                              ? 'bg-emerald-500/20 border-emerald-400 text-white'
+                              : 'bg-white/5 border-white/15 text-amber-50'
+                          }`}
+                        >
+                          <div className="min-w-0">
+                            <div className="font-heading font-black text-base sm:text-lg truncate">
+                              {s.title}
+                            </div>
+                            <div className="text-xs sm:text-sm text-amber-200/80 truncate">
+                              {s.artist} ({s.decade})
+                            </div>
+                          </div>
+                          <span className="font-mono text-xs font-black px-2 py-1 rounded-lg bg-black/50 text-amber-300 shrink-0">
+                            #{playedSongs.length - idx}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Connected Digital Participants Progress */}
+              {musicSnap.participants.length > 0 && (
+                <div className="p-5 rounded-3xl bg-black/55 border border-cyan-500/30 space-y-3">
+                  <div className="text-sm font-black text-cyan-200 uppercase tracking-wider">
+                    📱 Digitale deltakerbrett i salen ({musicSnap.participants.length})
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+                    {musicSnap.participants.map((p) => (
+                      <div
+                        key={p.id}
+                        className={`p-3 rounded-2xl border flex items-center justify-between gap-2 ${
+                          p.hasBingo
+                            ? 'bg-amber-500/25 border-amber-400 text-white'
+                            : 'bg-white/5 border-white/10 text-slate-100'
+                        }`}
+                      >
+                        <span className="font-bold text-sm truncate">{p.name}</span>
+                        <span className="font-mono font-black text-xs text-amber-300 shrink-0">
+                          {p.hasBingo ? `🏆 ${p.linesCompleted} rekker` : `${p.markedCount}/24 kryss`}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })()}
+
       {/* VIEW OPTION 0: MULTIPLAYER RIL ON BIG SCREEN — Floating Left Trommel Sidebar + Scrolling Player Cards */}
       {viewOption === 'multiplayer_ril' && (
-        <div className="flex-1 max-w-[1880px] mx-auto w-full py-4 flex flex-col md:flex-row items-start gap-5">
-          {/* Left Floating Trommel Rail: Stays pinned visibly on the left side while scrolling cards up/down */}
-          <aside className="w-full md:w-[390px] lg:w-[420px] xl:w-[445px] shrink-0 md:sticky md:top-3 self-start md:max-h-[calc(100vh-1.5rem)] md:overflow-y-auto no-scrollbar space-y-3 z-20">
+        <div className="flex-1 max-w-[1880px] mx-auto w-full py-4 flex flex-col md:flex-row items-start gap-5 lg:gap-6">
+          {/* Left Floating Trommel Rail: Generous width so TV & Projector show a large tumbler */}
+          <aside className="w-full md:w-[430px] lg:w-[500px] xl:w-[560px] 2xl:w-[620px] shrink-0 md:sticky md:top-3 self-start md:max-h-[calc(100vh-1.5rem)] md:overflow-y-auto no-scrollbar space-y-3 z-20">
             {showBlender ? (
               <BallCageCanvas
-                onBallDrawn={() => {
-                  if (canDrawInStorskjerm) onDrawNextBall();
+                onBallDrawn={(ball) => {
+                  if (canDrawInStorskjerm) onDrawNextBall(ball);
                 }}
                 calledBalls={calledBalls}
                 uncalledBalls={uncalledBalls}
@@ -578,7 +1507,9 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
                 scrambleTrigger={0}
                 canDraw={canDrawInStorskjerm}
                 readOnlyMessage="🔒 Arrangøren styrer kuletrekningen"
-                compactSidebar={true}
+                compactSidebar={false}
+                tumblerSize="tv"
+                layout="stacked"
               />
             ) : (
               <div className="p-4 rounded-2xl bg-gradient-to-br from-amber-950/70 via-[#1f1207] to-black/90 border border-amber-400/40 shadow-xl space-y-3">
@@ -632,7 +1563,7 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
                   ) : (
                     <button
                       type="button"
-                      onClick={onDrawNextBall}
+                      onClick={() => onDrawNextBall()}
                       disabled={uncalledBalls.length === 0}
                       className="w-full py-2.5 px-4 bg-gradient-to-r from-amber-400 to-amber-500 hover:brightness-110 text-slate-950 font-heading font-black text-xs rounded-xl shadow-lg cursor-pointer disabled:opacity-40"
                     >
@@ -915,7 +1846,7 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
             {/* 3D Ball Cage Tumbler Drum */}
             <div className="w-full">
               <BallCageCanvas
-                onBallDrawn={canDrawInStorskjerm ? onDrawNextBall : undefined}
+                onBallDrawn={canDrawInStorskjerm ? (ball) => onDrawNextBall(ball) : undefined}
                 calledBalls={calledBalls}
                 uncalledBalls={uncalledBalls}
                 isAutoCalling={canDrawInStorskjerm && isAutoCalling}
@@ -925,7 +1856,9 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
                 onScramble={canDrawInStorskjerm ? onAgitateMix : undefined}
                 onRefillDrum={canDrawInStorskjerm ? onRefillDrum : undefined}
                 canDraw={canDrawInStorskjerm}
-                compactSidebar={true}
+                compactSidebar={false}
+                tumblerSize="tv"
+                layout="stacked"
               />
             </div>
 
@@ -1103,7 +2036,7 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
             <div className="mt-8 flex justify-center">
               {canDrawInStorskjerm ? (
                 <button
-                  onClick={onDrawNextBall}
+                  onClick={() => onDrawNextBall()}
                   disabled={uncalledBalls.length === 0}
                   className="px-8 py-3.5 bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 text-slate-950 font-heading font-black text-base rounded-2xl shadow-xl transition-all cursor-pointer flex items-center gap-2"
                 >

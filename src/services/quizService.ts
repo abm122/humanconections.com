@@ -61,6 +61,8 @@ export interface QuizPublicQuestion {
   id: string;
   category: string;
   questionType: QuizQuestionType;
+  musicSongId?: string;
+  musicHint?: string;
   question: string;
   options: [string, string, string, string];
   samplePlaceholder?: string;
@@ -248,7 +250,12 @@ class QuizService {
 
     this.snapshot = sanitizedNext;
     this.lastError = null;
-    if (sanitizedNext.edition === 'adult' || sanitizedNext.edition === 'family' || sanitizedNext.edition === 'christmas') {
+    if (
+      sanitizedNext.edition === 'adult' ||
+      sanitizedNext.edition === 'family' ||
+      sanitizedNext.edition === 'christmas' ||
+      sanitizedNext.edition === 'senior'
+    ) {
       this.hostEdition = sanitizedNext.edition;
     }
     if (Array.isArray(sanitizedNext.teams) && sanitizedNext.teams.length >= 2) {
@@ -262,6 +269,8 @@ class QuizService {
             id: q.id,
             category: q.category,
             questionType: q.questionType,
+            musicSongId: q.musicSongId,
+            musicHint: q.musicHint,
             question: q.question,
             options: q.options,
             samplePlaceholder: q.samplePlaceholder,
@@ -474,6 +483,7 @@ class QuizService {
         liveOpenAnswers: [],
         liveOpenAnswerCount: 0,
         revealedAnswers: {},
+        mimeState: null,
         teamScores: this.hostTeams.reduce((acc, t) => ({ ...acc, [t.id]: 0 }), {}),
       });
     }
@@ -499,10 +509,11 @@ class QuizService {
     }
   }
 
-  public startQuestion(questionIndex: number, question: QuizQuestion) {
+  public startQuestion(questionIndex: number, question: QuizQuestion, durationSec = 60) {
     if (!this.getIsHost()) return;
     const questions = getQuestionsForEdition(question.edition);
     this.hostEdition = question.edition;
+    const safeDuration = Math.min(180, Math.max(15, Math.trunc(Number(durationSec) || 60)));
     const qType = question.questionType || 'multiple_choice';
     const hostKey = remoteBingo.getHostKeyForService();
     const roomCode = this.resolveActiveRoomCode();
@@ -513,11 +524,13 @@ class QuizService {
       edition: question.edition,
       questionIndex,
       totalQuestions: questions.length,
-      durationSec: 60,
+      durationSec: safeDuration,
       question: {
         id: question.id,
         category: question.category,
         questionType: qType,
+        musicSongId: question.musicSongId,
+        musicHint: question.musicHint,
         question: question.question,
         options: question.options,
         correctIndex: question.correctIndex,
@@ -540,6 +553,8 @@ class QuizService {
           id: question.id,
           category: question.category,
           questionType: qType,
+          musicSongId: question.musicSongId,
+          musicHint: question.musicHint,
           question: question.question,
           options: question.options,
           samplePlaceholder: question.samplePlaceholder,
@@ -547,7 +562,7 @@ class QuizService {
           wordplayJoke: null,
         },
         startedAt: Date.now(),
-        durationSec: 60,
+        durationSec: safeDuration,
         serverNow: Date.now(),
         answeredTeamIds: [],
         liveOpenAnswers: [],
@@ -611,6 +626,8 @@ class QuizService {
           id: String(rawQ.id || ''),
           category: String(rawQ.category || ''),
           questionType: rawQ.questionType || 'multiple_choice',
+          musicSongId: rawQ.musicSongId ? String(rawQ.musicSongId) : undefined,
+          musicHint: rawQ.musicHint ? String(rawQ.musicHint) : undefined,
           question: String(rawQ.question || ''),
           options: Array.isArray(rawQ.options) && rawQ.options.length === 4 ? (rawQ.options as [string, string, string, string]) : ['', '', '', ''],
           samplePlaceholder: rawQ.samplePlaceholder,
@@ -739,7 +756,7 @@ class QuizService {
   }
 
   public startMimeChoose(teamIndex: number, roundNumber: number) {
-    if (!this.getIsHost()) return;
+    if (!this.getIsHost() || this.getHostEdition() !== 'christmas') return;
     const teams = this.getHostTeams();
     const safeIdx = ((teamIndex % teams.length) + teams.length) % teams.length;
     const team = teams[safeIdx] || teams[0];
@@ -782,7 +799,7 @@ class QuizService {
     category: string,
     roundNumber: number
   ) {
-    if (!this.getIsHost()) return;
+    if (!this.getIsHost() || this.getHostEdition() !== 'christmas') return;
     const teams = this.getHostTeams();
     const safeIdx = ((teamIndex % teams.length) + teams.length) % teams.length;
     const team = teams[safeIdx] || teams[0];
@@ -823,7 +840,7 @@ class QuizService {
   }
 
   public revealMimeResult(guessedCorrect: boolean, points: number, secretWord?: string) {
-    if (!this.getIsHost()) return;
+    if (!this.getIsHost() || this.getHostEdition() !== 'christmas') return;
     const hostKey = remoteBingo.getHostKeyForService();
     const roomCode = this.resolveActiveRoomCode();
     socialSocket.send('quiz:mime_reveal', {

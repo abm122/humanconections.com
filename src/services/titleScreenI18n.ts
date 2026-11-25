@@ -27,6 +27,8 @@ export interface TitleScreenTexts {
   familyQuizTitle: string;
   christmasQuizLabel: string;
   christmasQuizTitle: string;
+  seniorQuizLabel: string;
+  seniorQuizTitle: string;
   memoryLabel: string;
   memoryTitle: string;
   mixer: string;
@@ -186,6 +188,8 @@ const NB_TEXTS: TitleScreenTexts = {
   familyQuizTitle: 'Valg 4: Familie- & Barnequiz (Kultur, Musikk & Ordlek)',
   christmasQuizLabel: 'JuleQuiz',
   christmasQuizTitle: 'Valg 5: JuleQuiz (300 spørsmål i tilfeldig rekkefølge + 80 Mimelek)',
+  seniorQuizLabel: 'Senior Grenland Quiz',
+  seniorQuizTitle: 'Valg 7: Senior Grenland Quiz — Blandet Musikk-gjetting (lydklipp), Grenland & Skien, Ungdomsminner & Skriv-svar (4–5 per skjerm)',
   memoryLabel: 'Memory',
   memoryTitle: 'Valg 6: Memory — Minnespill for barn med 30 bildekort (15 par), lagspill & +/- poeng',
   mixer: 'Mikser',
@@ -381,6 +385,8 @@ const EN_TEXTS: TitleScreenTexts = {
   familyQuizTitle: 'Option 4: Family & Kids Quiz (Culture, Music & Wordplay)',
   christmasQuizLabel: 'Christmas Quiz',
   christmasQuizTitle: 'Option 5: Christmas Quiz (300 Questions in Random Order + 80 Mime Words)',
+  seniorQuizLabel: 'Senior Grenland Quiz',
+  seniorQuizTitle: 'Option 7: Senior Grenland Quiz — Mixed Music Guessing (audio clips), Grenland & Skien History, Youth Memories & Write-In Answers (4–5 per screen)',
   memoryLabel: 'Memory',
   memoryTitle: 'Option 6: Memory — Kids & Team Picture Matching (30 Cards / 15 Pairs, +/- Points & Prize)',
   mixer: 'Mixer',
@@ -576,6 +582,8 @@ const TI_TEXTS: TitleScreenTexts = {
   familyQuizTitle: 'ምርጫ 4፡ ናይ ስድራቤትን ቆልዑን QUIZ',
   christmasQuizLabel: 'ናይ ልደት QUIZ',
   christmasQuizTitle: 'ምርጫ 5፡ ናይ ልደት QUIZ (ደርፊ ልደት፣ ባህልን ሕንቅልሕንቅሊተይን)',
+  seniorQuizLabel: 'Senior Grenland Quiz',
+  seniorQuizTitle: 'ምርጫ 7፡ Senior Grenland Quiz (ዝተሓወሰ ናይ ሙዚቃ ግምትን ታሪኽ ከባቢ Grenland/Skienን QUIZ)',
   memoryLabel: 'Memory',
   memoryTitle: 'ምርጫ 6፡ Memory — ናይ ቆልዑን ጋንታን ጸወታ ስእሊ (30 ካርድታት / 15 ጽምዲ)',
   mixer: 'ሚክሰር',

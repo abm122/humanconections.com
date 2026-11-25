@@ -5,12 +5,14 @@
 
 import React, { useState, useEffect } from 'react';
 import { sounds } from '../audio/soundEngine';
-import { remoteBingo, RemoteParticipant } from '../services/remoteBingo';
+import { remoteBingo, RemoteParticipant, HostActivityNotification } from '../services/remoteBingo';
 import { moderation } from '../services/moderation';
 import { sessionTimer } from '../services/sessionTimer';
 import { ownerControl, BannedParticipant } from '../services/ownerControl';
 import { socialSocket } from '../services/socialSocket';
 import { authService, AuthUser } from '../services/authService';
+import { musicBingoService } from '../services/musicBingoService';
+import { DigitalMusicBingoBoard } from './DigitalMusicBingoBoard';
 
 export interface HostMessageItem {
   id: string;
@@ -78,11 +80,26 @@ export const RemoteBingoModal: React.FC<RemoteBingoModalProps> = ({
   const [sessionRemaining, setSessionRemaining] = useState<string>(() => sessionTimer.getFormattedRemaining());
   const [isEditingHostName, setIsEditingHostName] = useState(false);
   const [hostNameDraft, setHostNameDraft] = useState('');
+  const [hostNotifications, setHostNotifications] = useState<HostActivityNotification[]>(() =>
+    remoteBingo.getHostNotifications()
+  );
+  const [unreadHostAlerts, setUnreadHostAlerts] = useState<number>(() =>
+    remoteBingo.getUnreadNotificationCount()
+  );
+  const [liveHostAlert, setLiveHostAlert] = useState<{
+    id: string;
+    type: 'join' | 'bingo';
+    text: string;
+  } | null>(null);
+  const [musicParticipants, setMusicParticipants] = useState(() =>
+    musicBingoService.getSnapshot().participants || []
+  );
 
   // Participant & Host messaging
   const [messages, setMessages] = useState<HostMessageItem[]>([]);
   const [msgInput, setMsgInput] = useState('');
   const [replyTarget, setReplyTarget] = useState<string | null>(null);
+  const [participantBoardMode, setParticipantBoardMode] = useState<'numbers' | 'music_bingo'>('numbers');
 
   const isRemote = remoteBingo.getIsRemotePlayer() && !ownerControl.isUnlocked();
   const canHost = !isRemote && hasPaid;
@@ -134,6 +151,76 @@ export const RemoteBingoModal: React.FC<RemoteBingoModalProps> = ({
       setRegError(remoteBingo.getRegistrationError());
       setIsCodeLocked(remoteBingo.isCodeLockedForRound());
       setShowCodeOnBigScreen(remoteBingo.isShowCodeOnBigScreen());
+      setHostNotifications(remoteBingo.getHostNotifications());
+      setUnreadHostAlerts(remoteBingo.getUnreadNotificationCount());
+    });
+
+    const unsubJoinAlert = remoteBingo.onParticipantJoined((p, total) => {
+      if (remoteBingo.getIsRemotePlayer() || !remoteBingo.canActAsHost()) return;
+      sounds.playPop(1.25);
+      const id = `join-${Date.now()}`;
+      setLiveHostAlert({
+        id,
+        type: 'join',
+        text: `👋 ${p.name} ble med i rommet (${p.game || 'Avstandsbingo'})! Totalt ${total} tilkoblet.`,
+      });
+      setHostNotifications(remoteBingo.getHostNotifications());
+      setTimeout(() => {
+        setLiveHostAlert((prev) => (prev?.id === id ? null : prev));
+      }, 6500);
+    });
+
+    const unsubClaimAlert = remoteBingo.onClaim((claim) => {
+      const tier =
+        claim.milestone ||
+        (claim.isFullHouse || /fullbrett/i.test(claim.pattern)
+          ? 'fullbrett'
+          : /3\s*\.?\s*rekke/i.test(claim.pattern)
+          ? 'line3'
+          : 'line1');
+      const tierLabel = tier === 'fullbrett' ? 'Fullt brett' : tier === 'line3' ? '3. rekker' : '1. rekke';
+      const nextText =
+        tier === 'fullbrett'
+          ? 'Ny runde starter!'
+          : tier === 'line3'
+          ? 'Spillet fortsetter til Full brett!'
+          : 'Spillet fortsetter til 3. rekker!';
+      sounds.playLineComplete();
+      const id = `claim-${Date.now()}`;
+      setLiveHostAlert({
+        id,
+        type: 'bingo',
+        text: `🏆 ${claim.playerName} har fylt ${tierLabel} og trykket BINGO! ➡️ ${nextText}`,
+      });
+      setHostNotifications(remoteBingo.getHostNotifications());
+      setTimeout(() => {
+        setLiveHostAlert((prev) => (prev?.id === id ? null : prev));
+      }, 8000);
+    });
+
+    const unsubMusic = musicBingoService.subscribe(() => {
+      setMusicParticipants([...(musicBingoService.getSnapshot().participants || [])]);
+      setHostNotifications(remoteBingo.getHostNotifications());
+    });
+
+    const unsubMusicClaim = musicBingoService.onClaim((mClaim) => {
+      sounds.playLineComplete();
+      const isFull = /fullt?\s*brett/i.test(mClaim.pattern);
+      const nextText = isFull
+        ? 'Ny runde kan startes!'
+        : /3\s*\.?\s*rekke/i.test(mClaim.pattern)
+        ? 'Spillet fortsetter til Fullt brett!'
+        : 'Spillet fortsetter til 3. rekker!';
+      const id = `mclaim-${Date.now()}`;
+      setLiveHostAlert({
+        id,
+        type: 'bingo',
+        text: `🎵 ${mClaim.playerName} fylte ${mClaim.pattern} og trykket MUSIKKBINGO! ➡️ ${nextText}`,
+      });
+      setHostNotifications(remoteBingo.getHostNotifications());
+      setTimeout(() => {
+        setLiveHostAlert((prev) => (prev?.id === id ? null : prev));
+      }, 8000);
     });
 
     const unsubSession = sessionTimer.subscribe(() => {
@@ -190,6 +277,10 @@ export const RemoteBingoModal: React.FC<RemoteBingoModalProps> = ({
 
     return () => {
       unsubRemote();
+      unsubJoinAlert();
+      unsubClaimAlert();
+      unsubMusic();
+      unsubMusicClaim();
       unsubSession();
       unsubAuth();
       unsubOwner();
@@ -361,7 +452,11 @@ export const RemoteBingoModal: React.FC<RemoteBingoModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-black/85 backdrop-blur-md animate-fadeIn">
-      <div className="relative w-full max-w-xl bg-gradient-to-b from-[#26150a] via-[#1a0f08] to-[#0d0804] border-2 border-amber-500/50 rounded-3xl p-5 sm:p-7 shadow-2xl text-amber-50 overflow-hidden flex flex-col max-h-[92vh]">
+      <div
+        className={`relative w-full bg-gradient-to-b from-[#26150a] via-[#1a0f08] to-[#0d0804] border-2 border-amber-500/50 rounded-3xl p-5 sm:p-7 shadow-2xl text-amber-50 overflow-hidden flex flex-col max-h-[92vh] transition-all ${
+          activeTab === 'join' && participantBoardMode === 'music_bingo' ? 'max-w-3xl' : 'max-w-xl'
+        }`}
+      >
         
         {/* Header */}
         <div className="flex items-center justify-between pb-3 border-b border-amber-500/20">
@@ -429,6 +524,7 @@ export const RemoteBingoModal: React.FC<RemoteBingoModalProps> = ({
             onClick={() => {
               sounds.playClick();
               setActiveTab('host');
+              remoteBingo.markHostNotificationsRead();
             }}
             className={`flex-1 py-2 px-2.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
               activeTab === 'host'
@@ -439,6 +535,11 @@ export const RemoteBingoModal: React.FC<RemoteBingoModalProps> = ({
             <span>👑</span>
             <span>Arrangør / Vert</span>
             {!hasPaid && <span className="text-[10px] bg-rose-900/80 text-rose-200 px-1.5 py-0.2 rounded-full border border-rose-500/40">Låst</span>}
+            {hasPaid && unreadHostAlerts > 0 && activeTab !== 'host' && (
+              <span className="px-1.5 py-0.2 rounded-full bg-emerald-400 text-slate-950 text-[9px] font-black">
+                {unreadHostAlerts}
+              </span>
+            )}
           </button>
 
           <button
@@ -462,6 +563,26 @@ export const RemoteBingoModal: React.FC<RemoteBingoModalProps> = ({
           </button>
         </div>
 
+        {/* Live Host Alert Banner inside Modal */}
+        {liveHostAlert && (
+          <div
+            className={`mb-3 p-3 rounded-xl border-2 text-xs font-black flex items-center justify-between gap-2 shadow-lg animate-fadeIn ${
+              liveHostAlert.type === 'bingo'
+                ? 'bg-gradient-to-r from-amber-500/30 to-emerald-500/30 border-amber-300 text-amber-100'
+                : 'bg-emerald-500/25 border-emerald-400 text-emerald-100'
+            }`}
+          >
+            <span>{liveHostAlert.text}</span>
+            <button
+              type="button"
+              onClick={() => setLiveHostAlert(null)}
+              className="text-white/80 hover:text-white font-black cursor-pointer shrink-0"
+            >
+              ✕
+            </button>
+          </div>
+        )}
+
         {/* Notices */}
         {errorMessage && (
           <div className="mb-3 p-3 rounded-xl bg-rose-500/20 border border-rose-400/50 text-rose-200 text-xs font-medium animate-fadeIn">
@@ -480,30 +601,71 @@ export const RemoteBingoModal: React.FC<RemoteBingoModalProps> = ({
           {activeTab === 'join' && (
             <div className="space-y-4">
               {isRemote && currentRoom ? (
-                <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-400/40 text-center space-y-3">
-                  <span className="text-3xl">🟢</span>
-                  <div className="font-heading font-black text-lg text-amber-200">
-                    Du er tilkoblet rom: <span className="text-amber-400 underline font-mono">{currentRoom}</span>
+                <div className="space-y-4">
+                  <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-400/40 text-center space-y-3">
+                    <span className="text-3xl">🟢</span>
+                    <div className="font-heading font-black text-lg text-amber-200">
+                      Du er tilkoblet rom: <span className="text-amber-400 underline font-mono">{currentRoom}</span>
+                    </div>
+                    <p className="text-xs text-amber-100/90 leading-relaxed">
+                      Spillernavn: <strong className="text-white">{remoteBingo.getPlayerName()}</strong>.
+                      Velg om du vil spille vanlig Tallbingo eller Digitalt Musikkbingo-brett!
+                    </p>
+
+                    <div className="grid grid-cols-2 gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          sounds.playClick();
+                          setParticipantBoardMode('numbers');
+                        }}
+                        className={`min-h-[44px] px-3 py-2 rounded-xl text-xs font-black border cursor-pointer transition-all ${
+                          participantBoardMode === 'numbers'
+                            ? 'bg-amber-400 text-slate-950 border-white shadow'
+                            : 'bg-black/45 text-amber-200 border-amber-500/30 hover:bg-black/65'
+                        }`}
+                      >
+                        🎱 Vanlig Tallbingo
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          sounds.playClick();
+                          setParticipantBoardMode('music_bingo');
+                        }}
+                        className={`min-h-[44px] px-3 py-2 rounded-xl text-xs font-black border cursor-pointer transition-all ${
+                          participantBoardMode === 'music_bingo'
+                            ? 'bg-gradient-to-r from-amber-400 to-rose-400 text-slate-950 border-white shadow'
+                            : 'bg-black/45 text-rose-200 border-rose-400/40 hover:bg-black/65'
+                        }`}
+                      >
+                        🎵 Musikkbingo-brett
+                      </button>
+                    </div>
+
+                    <div className="pt-1 flex flex-wrap justify-center gap-2">
+                      <button
+                        onClick={() => setActiveTab('messages')}
+                        className="px-4 py-2 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-400/50 text-amber-200 text-xs font-bold cursor-pointer transition-all flex items-center gap-1.5"
+                      >
+                        <span>💬</span>
+                        <span>Send melding til arrangør</span>
+                      </button>
+                      <button
+                        onClick={handleLeaveRemote}
+                        className="px-4 py-2 rounded-xl bg-rose-600/30 hover:bg-rose-600/50 border border-rose-400/40 text-rose-200 text-xs font-bold cursor-pointer transition-all"
+                      >
+                        Koble fra / Forlat rommet
+                      </button>
+                    </div>
                   </div>
-                  <p className="text-xs text-amber-100/90 leading-relaxed">
-                    Spillernavn: <strong className="text-white">{remoteBingo.getPlayerName()}</strong>.
-                    Kulene verten trekker dukker opp umiddelbart på bingobrettet ditt.
-                  </p>
-                  <div className="pt-2 flex flex-wrap justify-center gap-2">
-                    <button
-                      onClick={() => setActiveTab('messages')}
-                      className="px-4 py-2 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-400/50 text-amber-200 text-xs font-bold cursor-pointer transition-all flex items-center gap-1.5"
-                    >
-                      <span>💬</span>
-                      <span>Send melding til arrangør</span>
-                    </button>
-                    <button
-                      onClick={handleLeaveRemote}
-                      className="px-4 py-2 rounded-xl bg-rose-600/30 hover:bg-rose-600/50 border border-rose-400/40 text-rose-200 text-xs font-bold cursor-pointer transition-all"
-                    >
-                      Koble fra / Forlat rommet
-                    </button>
-                  </div>
+
+                  {participantBoardMode === 'music_bingo' && (
+                    <DigitalMusicBingoBoard
+                      roomCode={currentRoom}
+                      playerName={remoteBingo.getPlayerName() || inputName || 'Deltaker'}
+                    />
+                  )}
                 </div>
               ) : (
                 <form onSubmit={handleJoin} className="space-y-4">
@@ -860,17 +1022,61 @@ export const RemoteBingoModal: React.FC<RemoteBingoModalProps> = ({
                     </div>
                   </div>
 
+                  {/* Live Organizer Notifications: Who joined & BINGO claims */}
+                  <div className="p-4 rounded-2xl bg-gradient-to-br from-emerald-950/35 via-black/45 to-amber-950/35 border border-emerald-400/40 space-y-2.5">
+                    <div className="flex items-center justify-between gap-2 text-xs font-bold text-emerald-300 uppercase tracking-wider">
+                      <span>🔔 Varsler til arrangør — Hvem som ble med &amp; Bingorop ({hostNotifications.length})</span>
+                      {unreadHostAlerts > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => remoteBingo.markHostNotificationsRead()}
+                          className="px-2 py-0.5 rounded-lg bg-emerald-500/25 border border-emerald-400/50 text-[10px] font-black text-emerald-100 cursor-pointer"
+                        >
+                          ✓ Marker lest
+                        </button>
+                      )}
+                    </div>
+
+                    {hostNotifications.length === 0 ? (
+                      <div className="p-3 rounded-xl bg-black/35 border border-dashed border-emerald-400/25 text-xs text-slate-300/80 text-center">
+                        Ingen hendelser registrert ennå. Så snart en deltaker blir med med koden eller roper BINGO, dukker varselet opp her og som lyd/pop-up!
+                      </div>
+                    ) : (
+                      <div className="space-y-1.5 max-h-44 overflow-y-auto pr-1">
+                        {hostNotifications.map((item) => (
+                          <div
+                            key={item.id}
+                            className={`p-2.5 rounded-xl border text-xs flex items-start justify-between gap-2 ${
+                              item.type === 'bingo'
+                                ? 'bg-amber-500/20 border-amber-400/60 text-amber-100 font-bold'
+                                : 'bg-emerald-500/15 border-emerald-400/40 text-emerald-100'
+                            }`}
+                          >
+                            <div className="space-y-0.5 min-w-0">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span>{item.type === 'bingo' ? '🏆' : '👋'}</span>
+                                <span className="font-black">{item.detail}</span>
+                              </div>
+                              <div className="text-[10px] text-amber-200/70">
+                                {item.gameLabel} · {new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
                   {/* Connected participants list */}
                   <div className="p-4 rounded-2xl bg-black/40 border border-amber-500/30 space-y-2">
                     <div className="flex items-center justify-between text-xs font-bold text-amber-300 uppercase tracking-wider">
-                      <span>Tilkoblede deltakere ({participants.length}) · Runde {roundNumber}</span>
+                      <span>Tilkoblede deltakere ({participants.length + musicParticipants.filter((mp) => !participants.some((rp) => rp.id === mp.id)).length}) · Runde {roundNumber}</span>
                       <span className="text-[10px] text-emerald-400 flex items-center gap-1">
-                        <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
                         Sanntid
                       </span>
                     </div>
 
-                    {participants.length === 0 ? (
+                    {participants.length === 0 && musicParticipants.length === 0 ? (
                       <div className="p-4 rounded-xl bg-black/30 border border-dashed border-amber-500/20 text-center text-xs text-amber-300/60">
                         Ingen mobildeltakere tilkoblet ennå. Del koden eller lenken over så dukker navnene opp her og på Storskjermen med en gang!
                       </div>
@@ -887,6 +1093,9 @@ export const RemoteBingoModal: React.FC<RemoteBingoModalProps> = ({
                                 style={{ backgroundColor: p.color || '#f59e0b' }}
                               />
                               <span className="font-bold text-amber-100">{p.name}</span>
+                              {p.game && (
+                                <span className="text-[10px] text-cyan-300/80 font-semibold">· {p.game}</span>
+                              )}
                             </div>
 
                             <button
@@ -898,6 +1107,21 @@ export const RemoteBingoModal: React.FC<RemoteBingoModalProps> = ({
                             </button>
                           </div>
                         ))}
+                        {musicParticipants
+                          .filter((mp) => !participants.some((rp) => rp.id === mp.id))
+                          .map((mp) => (
+                            <div
+                              key={`mp-${mp.id}`}
+                              className="flex items-center justify-between p-2 rounded-xl bg-amber-500/10 border border-amber-400/30 text-xs"
+                            >
+                              <div className="flex items-center gap-2">
+                                <span className="font-bold text-amber-100">{mp.name}</span>
+                                <span className="text-[10px] text-amber-300 font-semibold">
+                                  · Musikkbingo ({mp.markedCount} kryss · {mp.linesCompleted} rekker)
+                                </span>
+                              </div>
+                            </div>
+                          ))}
                       </div>
                     )}
                   </div>

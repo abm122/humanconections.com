@@ -3,6 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { i18n, SupportedLanguage, SUPPORTED_LANGUAGES } from '../services/i18n';
+
 export interface PauseTrack {
   id: string;
   name: string;
@@ -67,8 +69,29 @@ class SoundEngine {
   private pauseMusicGain: GainNode | null = null;
   private pauseMusicStep: number = 0;
 
+  // Web Speech Synthesis reliability & voice matching state
+  private cachedVoices: SpeechSynthesisVoice[] = [];
+  private currentUtterance: SpeechSynthesisUtterance | null = null;
+  private speechDispatchTimer: number | null = null;
+  private speechSequence: number = 0;
+  private lastSpokenBallKey: string = '';
+  private lastSpokenBallAt: number = 0;
+
   constructor() {
-    // Initialized cleanly
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      const refreshVoices = () => {
+        try {
+          const loaded = window.speechSynthesis.getVoices();
+          if (loaded && loaded.length > 0) {
+            this.cachedVoices = loaded;
+          }
+        } catch {
+          // ignore
+        }
+      };
+      refreshVoices();
+      window.speechSynthesis.addEventListener?.('voiceschanged', refreshVoices);
+    }
   }
 
   private initCtx() {
@@ -85,6 +108,19 @@ class SoundEngine {
 
   public setMuted(muted: boolean) {
     this.isMuted = muted;
+    if (muted && typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      try {
+        if (this.speechDispatchTimer !== null) {
+          window.clearTimeout(this.speechDispatchTimer);
+          this.speechDispatchTimer = null;
+        }
+        this.speechSequence++;
+        window.speechSynthesis.cancel();
+        this.currentUtterance = null;
+      } catch {
+        // ignore
+      }
+    }
     if (this.ambientGain) {
       this.ambientGain.gain.setValueAtTime(muted ? 0 : this.ambientVol * this.masterVol, this.ctx?.currentTime || 0);
     }
@@ -606,51 +642,135 @@ class SoundEngine {
   }
 
   /**
-   * Helper to determine active UI language:
-   * Returns 'en' if English is selected, otherwise Norwegian ('nb').
+   * Returns the exact active UI language selected in the language menu.
    */
-  public getActiveLanguage(): 'nb' | 'en' {
-    if (typeof window !== 'undefined') {
-      try {
-        const lang = localStorage.getItem('joypulse_language');
-        if (lang === 'en') return 'en';
-      } catch {
-        // ignore
+  public getActiveLanguage(): SupportedLanguage {
+    try {
+      return i18n.getLanguage();
+    } catch {
+      if (typeof window !== 'undefined') {
+        const saved = localStorage.getItem('joypulse_language') as SupportedLanguage | null;
+        if (saved && SUPPORTED_LANGUAGES.some((l) => l.code === saved)) {
+          return saved;
+        }
       }
+      return 'nb';
     }
-    return 'nb';
   }
 
-  /**
-   * Speak ball announcement using speech synthesis:
-   * Tale følger språkmenyen direkte:
-   * - Engelsk aktiv: Roper kule på engelsk (f.eks. "B 12") med amerikansk/britisk uttale.
-   * - Norsk aktiv: Roper kule og bekreftende tanke på norsk (f.eks. "B 12. Varm klem og omtanke").
-   */
-  public speakBall(letter: string, number: number, affirmation: string) {
+  private getSpeechLocale(lang: SupportedLanguage): string {
+    return SUPPORTED_LANGUAGES.find((l) => l.code === lang)?.speechLocale || 'nb-NO';
+  }
+
+  private selectVoiceForLanguage(lang: SupportedLanguage, speechLocale: string): SpeechSynthesisVoice | null {
+    if (typeof window === 'undefined' || !('speechSynthesis' in window)) return null;
+    try {
+      const freshVoices = window.speechSynthesis.getVoices();
+      const voices = freshVoices.length > 0 ? freshVoices : this.cachedVoices;
+      if (freshVoices.length > 0) this.cachedVoices = freshVoices;
+      if (!voices || voices.length === 0) return null;
+
+      const exactCandidates: Record<SupportedLanguage, string[]> = {
+        nb: ['nb-no', 'no-no', 'nn-no', 'nb', 'no'],
+        en: ['en-us', 'en-gb', 'en-au', 'en'],
+        sv: ['sv-se', 'sv-fi', 'sv'],
+        de: ['de-de', 'de-at', 'de-ch', 'de'],
+        es: ['es-es', 'es-mx', 'es-us', 'es-419', 'es'],
+        fr: ['fr-fr', 'fr-ca', 'fr-be', 'fr'],
+        ar: ['ar-sa', 'ar-eg', 'ar-ae', 'ar'],
+        ti: ['ti-et', 'ti-er', 'ti'],
+      };
+
+      const prefixCandidates: Record<SupportedLanguage, string[]> = {
+        nb: ['nb', 'no', 'nn'],
+        en: ['en'],
+        sv: ['sv'],
+        de: ['de'],
+        es: ['es'],
+        fr: ['fr'],
+        ar: ['ar'],
+        ti: ['ti'],
+      };
+
+      const exactList = [speechLocale.toLowerCase(), ...(exactCandidates[lang] || [])];
+      for (const candidate of exactList) {
+        const match = voices.find((v) => v.lang.toLowerCase() === candidate);
+        if (match) return match;
+      }
+
+      const prefixes = prefixCandidates[lang] || [lang];
+      for (const prefix of prefixes) {
+        const match = voices.find((v) => {
+          const vl = v.lang.toLowerCase();
+          return vl === prefix || vl.startsWith(`${prefix}-`) || vl.startsWith(`${prefix}_`);
+        });
+        if (match) return match;
+      }
+    } catch {
+      // ignore voice lookup failures
+    }
+    return null;
+  }
+
+  private dispatchSpeech(
+    text: string,
+    lang: SupportedLanguage,
+    opts?: { rate?: number; pitch?: number }
+  ) {
     if (this.isMuted || !this.isSpeechEnabled) return;
     if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
 
     try {
-      window.speechSynthesis.cancel();
-      const currentLang = this.getActiveLanguage();
+      const synth = window.speechSynthesis;
+      if (this.speechDispatchTimer !== null) {
+        window.clearTimeout(this.speechDispatchTimer);
+        this.speechDispatchTimer = null;
+      }
+      const seq = ++this.speechSequence;
 
-      if (currentLang === 'en') {
-        const englishText = `${letter} ${number}`;
-        const uEng = new SpeechSynthesisUtterance(englishText);
-        uEng.lang = 'en-US';
-        uEng.rate = this.speechRate;
-        uEng.pitch = 1.05;
-        uEng.volume = this.speechVol * this.masterVol;
-        window.speechSynthesis.speak(uEng);
+      const speechLocale = this.getSpeechLocale(lang);
+      const matchedVoice = this.selectVoiceForLanguage(lang, speechLocale);
+
+      const u = new SpeechSynthesisUtterance(text);
+      u.lang = matchedVoice?.lang || speechLocale;
+      if (matchedVoice) {
+        u.voice = matchedVoice;
+      }
+      u.rate = opts?.rate ?? this.speechRate;
+      u.pitch = opts?.pitch ?? 1.04;
+      u.volume = this.speechVol * this.masterVol;
+      u.onend = () => {
+        if (this.currentUtterance === u) {
+          this.currentUtterance = null;
+        }
+      };
+      u.onerror = () => {
+        if (this.currentUtterance === u) {
+          this.currentUtterance = null;
+        }
+      };
+
+      if (synth.paused) {
+        synth.resume();
+      }
+
+      if (synth.speaking || synth.pending) {
+        // Cancel existing utterance and wait a short beat so Chromium does not drop the new utterance
+        synth.cancel();
+        this.speechDispatchTimer = window.setTimeout(() => {
+          this.speechDispatchTimer = null;
+          if (seq !== this.speechSequence || this.isMuted || !this.isSpeechEnabled) return;
+          try {
+            if (synth.paused) synth.resume();
+            this.currentUtterance = u;
+            synth.speak(u);
+          } catch {
+            // fail silent
+          }
+        }, 65);
       } else {
-        const norwegianText = `${letter} ${number}. ${affirmation}`;
-        const uNor = new SpeechSynthesisUtterance(norwegianText);
-        uNor.lang = 'nb-NO';
-        uNor.rate = this.speechRate;
-        uNor.pitch = 1.05;
-        uNor.volume = this.speechVol * this.masterVol;
-        window.speechSynthesis.speak(uNor);
+        this.currentUtterance = u;
+        synth.speak(u);
       }
     } catch {
       // speech fail silent
@@ -658,41 +778,52 @@ class SoundEngine {
   }
 
   /**
-   * Voice celebration announcement for Bingo / Line win:
-   * Tale følger språkmenyen direkte:
-   * - Engelsk aktiv: "BINGO! Congratulations!" / "Line complete!"
-   * - Norsk aktiv: "BINGO! Gratulerer med seieren!" / "Fullført linje!"
+   * Speak ball announcement strictly in the currently selected menu language.
+   * Avoids reading untranslated English affirmations when non-English languages are active
+   * and prevents double-cancel drops.
+   */
+  public speakBall(letter: string, number: number, _affirmation?: string) {
+    if (this.isMuted || !this.isSpeechEnabled) return;
+    if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
+
+    const currentLang = this.getActiveLanguage();
+    const dedupKey = `${currentLang}:${letter}-${number}`;
+    const now = Date.now();
+    if (this.lastSpokenBallKey === dedupKey && now - this.lastSpokenBallAt < 450) {
+      return;
+    }
+    this.lastSpokenBallKey = dedupKey;
+    this.lastSpokenBallAt = now;
+
+    // Pause cleanly at the comma so letter & number are never slurred together in any language
+    const spokenText = `${letter}, ${number}`;
+    this.dispatchSpeech(spokenText, currentLang, { rate: Math.min(this.speechRate, 1.02), pitch: 1.04 });
+  }
+
+  /**
+   * Voice celebration announcement for Bingo / Line win in the active menu language.
    */
   public speakWin(isBingo: boolean) {
     if (this.isMuted || !this.isSpeechEnabled) return;
     if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
 
-    try {
-      window.speechSynthesis.cancel();
-      const currentLang = this.getActiveLanguage();
+    const currentLang = this.getActiveLanguage();
+    const winPhrases: Record<SupportedLanguage, { bingo: string; line: string }> = {
+      nb: { bingo: 'BINGO! Gratulerer med seieren!', line: 'Fullført rekke!' },
+      en: { bingo: 'BINGO! Congratulations!', line: 'Line complete!' },
+      sv: { bingo: 'BINGO! Grattis till vinsten!', line: 'Fullbordad rad!' },
+      de: { bingo: 'BINGO! Herzlichen Glückwunsch!', line: 'Reihe komplett!' },
+      es: { bingo: 'BINGO! Felicidades!', line: 'Línea completa!' },
+      fr: { bingo: 'BINGO! Félicitations!', line: 'Ligne complète!' },
+      ar: { bingo: 'بينجو! مبروك الفوز!', line: 'تم إكمال الصف!' },
+      ti: { bingo: 'BINGO!', line: '1 Line!' },
+    };
 
-      if (currentLang === 'en') {
-        const uEng = new SpeechSynthesisUtterance(
-          isBingo ? 'BINGO! Congratulations!' : 'Line complete!'
-        );
-        uEng.lang = 'en-US';
-        uEng.rate = 1.0;
-        uEng.pitch = 1.2;
-        uEng.volume = this.speechVol * this.masterVol;
-        window.speechSynthesis.speak(uEng);
-      } else {
-        const uNor = new SpeechSynthesisUtterance(
-          isBingo ? 'BINGO! Gratulerer med seieren!' : 'Fullført linje!'
-        );
-        uNor.lang = 'nb-NO';
-        uNor.rate = 1.0;
-        uNor.pitch = 1.2;
-        uNor.volume = this.speechVol * this.masterVol;
-        window.speechSynthesis.speak(uNor);
-      }
-    } catch {
-      // speech fail silent
-    }
+    const phrase = winPhrases[currentLang] || winPhrases.nb;
+    this.dispatchSpeech(isBingo ? phrase.bingo : phrase.line, currentLang, {
+      rate: 1.0,
+      pitch: 1.15,
+    });
   }
 }
 

@@ -3,12 +3,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { sounds } from '../audio/soundEngine';
 import { authService } from '../services/authService';
 import { sessionTimer } from '../services/sessionTimer';
 import { remoteBingo } from '../services/remoteBingo';
 import { ownerControl } from '../services/ownerControl';
+import { MUSIC_BINGO_SONGS } from '../data/musicBingoSongs';
+import { musicClipPlayer, MusicClipPlayerState } from '../services/musicClipPlayer';
 import {
   CHRISTMAS_MIME_CARDS,
   QuizCategory,
@@ -106,6 +108,7 @@ export const QuizGameModal: React.FC<QuizGameModalProps> = ({
   // Host state
   const [selectedQuestionIdx, setSelectedQuestionIdx] = useState<number>(0);
   const [activePreparedQ, setActivePreparedQ] = useState<QuizQuestion | null>(null);
+  const [hostDurationSec, setHostDurationSec] = useState<number>(initialEdition === 'senior' ? 90 : 60);
   const [randomOrderEnabled, setRandomOrderEnabled] = useState<boolean>(true);
   const [drawnQuestionIds, setDrawnQuestionIds] = useState<string[]>(() =>
     loadDrawnIdsForEdition(initialEdition)
@@ -138,13 +141,14 @@ export const QuizGameModal: React.FC<QuizGameModalProps> = ({
   const [showAllMimeCards, setShowAllMimeCards] = useState<boolean>(false);
   const [mimeSearch, setMimeSearch] = useState<string>('');
 
-  // Join form state (participants joining via koblingskode)
+  // Join form state (participants joining via koblingskode — inkl. Bord 1-16 for 4-5 personer per skjerm)
   const [joinCode, setJoinCode] = useState<string>(initialJoinCode || '');
   const [joinName, setJoinName] = useState<string>(() => {
     const u = authService.getCurrentUser();
     return u.isAuthenticated && u.name && u.name !== 'Gjest' ? u.name : '';
   });
   const [joinTeamId, setJoinTeamId] = useState<string>('team-red');
+  const [selectedTableNumber, setSelectedTableNumber] = useState<number | null>(null);
   const [customTeamName, setCustomTeamName] = useState<string>('');
   const [joinError, setJoinError] = useState<string | null>(null);
 
@@ -155,10 +159,18 @@ export const QuizGameModal: React.FC<QuizGameModalProps> = ({
   const [openTextError, setOpenTextError] = useState<string | null>(null);
   const [quizError, setQuizError] = useState<string | null>(null);
 
+  // In-app audio clip player state for blended Music + Senior Quiz questions
+  const [clipPlayer, setClipPlayer] = useState<MusicClipPlayerState>(() => musicClipPlayer.getState());
+  const [quizClipDurationSec, setQuizClipDurationSec] = useState<number>(30);
+  const quizAudioFileInputRef = useRef<HTMLInputElement | null>(null);
+  const pendingAudioSongIdRef = useRef<string | null>(null);
+
   useEffect(() => {
     if (!isOpen) return;
 
     setEdition(initialEdition);
+    setHostDurationSec(initialEdition === 'senior' ? 90 : 60);
+    setCategoryFilter('Alle');
     setRandomOrderEnabled(true);
     setDrawnQuestionIds(loadDrawnIdsForEdition(initialEdition));
     if (initialJoinCode && initialJoinCode.trim()) {
@@ -205,6 +217,7 @@ export const QuizGameModal: React.FC<QuizGameModalProps> = ({
 
     const unsubQuizJoin = quizService.onParticipantJoined((p, total) => {
       sounds.playPop(1.2);
+      remoteBingo.recordParticipantJoinedExternal(p.id, p.name, '#06b6d4', `Quiz (${p.teamName || 'Lag'})`);
       setJoinNotice(`👋 ${p.name} ble med på ${p.teamName || 'laget'} med koden! (${total} aktive deltakere)`);
       setTimeout(() => setJoinNotice(null), 5000);
     });
@@ -214,12 +227,24 @@ export const QuizGameModal: React.FC<QuizGameModalProps> = ({
       setHasFullPaid(sessionTimer.hasFullPaidAccess());
     });
 
+    const unsubClip = musicClipPlayer.subscribe(() => {
+      setClipPlayer(musicClipPlayer.getState());
+    });
+
     return () => {
       unsubQuiz();
       unsubQuizJoin();
       unsubSession();
+      unsubClip();
     };
   }, []);
+
+  // Stop audio clip playback when quiz modal closes
+  useEffect(() => {
+    if (!isOpen) {
+      musicClipPlayer.stop();
+    }
+  }, [isOpen]);
 
   // Reset picked option & open-text input when question changes
   useEffect(() => {
@@ -303,6 +328,12 @@ export const QuizGameModal: React.FC<QuizGameModalProps> = ({
       if (cat === 'Fans & Popkultur') return '📖 Bibelen & Helgener';
       if (cat === 'Ordlek & Humor') return '✨ Familiegåter & Glede';
     }
+    if (activeEdition === 'senior') {
+      if (cat === 'Musikk-gjetting') return '🎵 Musikk-gjetting (Lydklipp & Quiz)';
+      if (cat === 'Grenland & Skien') return '🏔️ Grenland & Skien (Lokalhistorie)';
+      if (cat === 'Ungdomsminner') return '📻 Ungdomsminner (50–80-tallet)';
+      if (cat === 'Allmennkunnskap') return '💡 Allmennkunnskap';
+    }
     return cat;
   };
 
@@ -369,9 +400,12 @@ export const QuizGameModal: React.FC<QuizGameModalProps> = ({
 
   const handleEditionSwitch = (nextEd: QuizEdition) => {
     sounds.playClick();
+    musicClipPlayer.stop();
     setEdition(nextEd);
     setSelectedQuestionIdx(0);
     setActivePreparedQ(null);
+    setCategoryFilter('Alle');
+    setHostDurationSec(nextEd === 'senior' ? 90 : 60);
     setDrawnQuestionIds(loadDrawnIdsForEdition(nextEd));
     setRandomOrderEnabled(true);
     setHostActivityMode('quiz');
@@ -392,7 +426,17 @@ export const QuizGameModal: React.FC<QuizGameModalProps> = ({
       saveDrawnIdsForEdition(targetEd, next);
       return next;
     });
-    quizService.startQuestion(idx, prepared);
+    if (prepared.musicSongId) {
+      const linkedSong = MUSIC_BINGO_SONGS.find((s) => s.id === prepared.musicSongId);
+      if (linkedSong) {
+        void musicClipPlayer.playSongClip(linkedSong, quizClipDurationSec);
+      } else {
+        musicClipPlayer.stop();
+      }
+    } else {
+      musicClipPlayer.stop();
+    }
+    quizService.startQuestion(idx, prepared, hostDurationSec);
   };
 
   const handleReveal = () => {
@@ -402,8 +446,8 @@ export const QuizGameModal: React.FC<QuizGameModalProps> = ({
     quizService.revealAnswer(activeQ);
   };
 
-  const handleRandomQuestion = (filterMode: 'all' | 'open_text' | 'multiple_choice' | boolean = 'all') => {
-    const resolvedFilter: 'all' | 'open_text' | 'multiple_choice' =
+  const handleRandomQuestion = (filterMode: 'all' | 'open_text' | 'multiple_choice' | 'music' | boolean = 'all') => {
+    const resolvedFilter: 'all' | 'open_text' | 'multiple_choice' | 'music' =
       filterMode === true ? 'open_text' : filterMode === false ? 'all' : filterMode;
     const currentIdx = snapshot?.questionIndex ?? selectedQuestionIdx;
     // Hent strengt kun fra valgt quiz-utgave (aldri blandet mellom forskjellige quizer)
@@ -413,6 +457,7 @@ export const QuizGameModal: React.FC<QuizGameModalProps> = ({
       .filter(({ q }) => {
         if (resolvedFilter === 'open_text') return q.questionType === 'open_text';
         if (resolvedFilter === 'multiple_choice') return (q.questionType || 'multiple_choice') === 'multiple_choice';
+        if (resolvedFilter === 'music') return Boolean(q.musicSongId);
         return true;
       });
     if (matchingEntries.length === 0) return;
@@ -443,6 +488,7 @@ export const QuizGameModal: React.FC<QuizGameModalProps> = ({
     if (currentIdx + 1 < questions.length) {
       handleStartQuestion(currentIdx + 1);
     } else {
+      musicClipPlayer.stop();
       sounds.playBingoWin();
       quizService.finishGame();
     }
@@ -454,12 +500,33 @@ export const QuizGameModal: React.FC<QuizGameModalProps> = ({
     setJoinError(null);
     setIsJoining(true);
     const chosenDefault = DEFAULT_QUIZ_TEAMS.find((t) => t.id === joinTeamId) || DEFAULT_QUIZ_TEAMS[0];
+    const palette: QuizTeamColor[] = ['red', 'blue', 'emerald', 'amber'];
+    const trimmedCustom = customTeamName.trim();
+    let resolvedTeamId = chosenDefault.id;
+    let resolvedTeamName = trimmedCustom || chosenDefault.name;
+    let resolvedColor: QuizTeamColor = chosenDefault.color;
+
+    if (selectedTableNumber !== null) {
+      resolvedTeamId = `bord-${selectedTableNumber}`;
+      resolvedTeamName = trimmedCustom || `Bord ${selectedTableNumber}`;
+      resolvedColor = palette[(selectedTableNumber - 1) % palette.length];
+    } else if (trimmedCustom && trimmedCustom.toLowerCase() !== chosenDefault.name.toLowerCase()) {
+      const slug = trimmedCustom
+        .toLowerCase()
+        .replace(/[^a-z0-9æøå]+/gi, '-')
+        .replace(/^-|-$/g, '')
+        .slice(0, 28);
+      if (slug) {
+        resolvedTeamId = `team-${slug}`;
+      }
+    }
+
     const res = await quizService.validateAndJoinQuizWithCode(
       joinCode,
       joinName,
-      joinTeamId,
-      customTeamName.trim() || chosenDefault.name,
-      chosenDefault.color
+      resolvedTeamId,
+      resolvedTeamName,
+      resolvedColor
     );
     setIsJoining(false);
     if (!res.success) {
@@ -513,7 +580,40 @@ export const QuizGameModal: React.FC<QuizGameModalProps> = ({
     quizService.updateTeams(updated);
   };
 
-  const timeProgressPct = Math.max(0, Math.min(100, (remainingSec / 60) * 100));
+  const handlePresetTables = (count: number) => {
+    sounds.playClick();
+    if (count <= 4) {
+      const base = DEFAULT_QUIZ_TEAMS.map((t) => ({ ...t }));
+      setEditingTeams(base);
+      quizService.updateTeams(base);
+      return;
+    }
+    const palette: QuizTeamColor[] = ['red', 'blue', 'emerald', 'amber'];
+    const generated: QuizTeamDef[] = Array.from({ length: count }, (_, idx) => ({
+      id: `bord-${idx + 1}`,
+      name: `Bord ${idx + 1}`,
+      color: palette[idx % palette.length],
+    }));
+    setEditingTeams(generated);
+    quizService.updateTeams(generated);
+  };
+
+  const handleAddSingleTable = () => {
+    sounds.playClick();
+    const palette: QuizTeamColor[] = ['red', 'blue', 'emerald', 'amber'];
+    const nextNum = editingTeams.length + 1;
+    const nextTeam: QuizTeamDef = {
+      id: `bord-${nextNum}`,
+      name: `Bord ${nextNum}`,
+      color: palette[(nextNum - 1) % palette.length],
+    };
+    const updated = [...editingTeams, nextTeam];
+    setEditingTeams(updated);
+    quizService.updateTeams(updated);
+  };
+
+  const effectiveDurationSec = snapshot?.durationSec || hostDurationSec || 60;
+  const timeProgressPct = Math.max(0, Math.min(100, (remainingSec / effectiveDurationSec) * 100));
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/90 backdrop-blur-md overflow-y-auto animate-fadeIn">
@@ -529,7 +629,13 @@ export const QuizGameModal: React.FC<QuizGameModalProps> = ({
                   : 'bg-amber-400 text-slate-950'
               }`}
             >
-              {activeEdition === 'adult' ? '🎭' : activeEdition === 'family' ? '🎈' : '🎄'}
+              {activeEdition === 'adult'
+                ? '🎭'
+                : activeEdition === 'family'
+                ? '🎈'
+                : activeEdition === 'senior'
+                ? '👵'
+                : '🎄'}
             </div>
             <div>
               <h2 className="font-heading font-black text-base sm:text-lg text-white leading-tight">
@@ -537,7 +643,9 @@ export const QuizGameModal: React.FC<QuizGameModalProps> = ({
                   ? 'QUIZ — Kultur-, Musikk- & Fanquiz'
                   : activeEdition === 'family'
                     ? 'Familie- & Barnequiz — Kultur, Musikk & Ordlek'
-                    : `JuleQuiz — Katolsk Familiequiz & ${CHRISTMAS_MIME_CARDS.length} Mimelek`}
+                    : activeEdition === 'senior'
+                      ? 'Senior Grenland Quiz — Musikk-gjetting, Lokalhistorie & Skriv-svar'
+                      : `JuleQuiz — Katolsk Familiequiz & ${CHRISTMAS_MIME_CARDS.length} Mimelek`}
               </h2>
               <div className="flex items-center gap-2 text-xs text-slate-400 mt-0.5">
                 {(isHost && hasFullPaid && roomCode) || (isRemoteParticipant && snapshot?.roomCode) ? (
@@ -556,7 +664,7 @@ export const QuizGameModal: React.FC<QuizGameModalProps> = ({
                     <span aria-hidden="true">·</span>
                   </>
                 )}
-                <span>Maks 60 sek per spørsmål</span>
+                <span>Maks {effectiveDurationSec} sek per spørsmål</span>
                 {hasFullPaid && !isRemoteParticipant && (
                   <>
                     <span aria-hidden="true">·</span>
@@ -727,7 +835,7 @@ export const QuizGameModal: React.FC<QuizGameModalProps> = ({
 
           {/* Edition Toggle for Host */}
           {isHost && (
-            <div className="flex items-center gap-1 p-1 rounded-lg bg-black/50 border border-white/10">
+            <div className="flex flex-wrap items-center gap-1 p-1 rounded-lg bg-black/50 border border-white/10">
               <button
                 type="button"
                 onClick={() => handleEditionSwitch('adult')}
@@ -748,7 +856,7 @@ export const QuizGameModal: React.FC<QuizGameModalProps> = ({
                     : 'text-slate-300 hover:text-white'
                 }`}
               >
-                🎈 Familie & Barn
+                🎈 Familie &amp; Barn
               </button>
               <button
                 type="button"
@@ -760,6 +868,17 @@ export const QuizGameModal: React.FC<QuizGameModalProps> = ({
                 }`}
               >
                 🎄 JuleQuiz
+              </button>
+              <button
+                type="button"
+                onClick={() => handleEditionSwitch('senior')}
+                className={`px-3 py-1.5 rounded-md text-xs font-black cursor-pointer transition-colors whitespace-nowrap shrink-0 ${
+                  activeEdition === 'senior'
+                    ? 'bg-gradient-to-r from-amber-300 to-emerald-400 text-slate-950'
+                    : 'text-amber-200 hover:text-white'
+                }`}
+              >
+                👵 Senior Grenland Quiz
               </button>
             </div>
           )}
@@ -905,21 +1024,69 @@ export const QuizGameModal: React.FC<QuizGameModalProps> = ({
                     >
                       🎙️ Spørsmålsquiz ({questions.length})
                     </button>
-                    <button
-                      type="button"
-                      onClick={handleOpenMimeMode}
-                      className={`px-3.5 py-2 rounded-xl text-xs font-black cursor-pointer transition-all ${
-                        hostActivityMode === 'mime'
-                          ? 'bg-rose-500 text-white shadow ring-2 ring-rose-300/60'
-                          : 'bg-rose-500/20 border border-rose-400/50 text-rose-200 hover:bg-rose-500/30'
-                      }`}
-                    >
-                      🎭 Mimelek ({CHRISTMAS_MIME_CARDS.length} katolske ord · Lagrundgang)
-                    </button>
+                    {activeEdition === 'christmas' && (
+                      <button
+                        type="button"
+                        onClick={handleOpenMimeMode}
+                        className={`px-3.5 py-2 rounded-xl text-xs font-black cursor-pointer transition-all ${
+                          hostActivityMode === 'mime'
+                            ? 'bg-rose-500 text-white shadow ring-2 ring-rose-300/60'
+                            : 'bg-rose-500/20 border border-rose-400/50 text-rose-200 hover:bg-rose-500/30'
+                        }`}
+                      >
+                        🎭 Mimelek ({CHRISTMAS_MIME_CARDS.length} katolske ord · Lagrundgang)
+                      </button>
+                    )}
                   </div>
 
                   {hostActivityMode === 'quiz' && (
-                    <div className="flex items-center gap-1.5">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <div className="flex items-center gap-1 bg-black/40 p-1 rounded-lg border border-white/10">
+                        <span className="text-[10px] font-bold text-slate-300 px-1">Tid:</span>
+                        {[
+                          { sec: 60, label: '60s' },
+                          { sec: 90, label: '90s (Senior)' },
+                          { sec: 120, label: '120s (Rolig)' },
+                        ].map((opt) => (
+                          <button
+                            key={opt.sec}
+                            type="button"
+                            onClick={() => {
+                              sounds.playClick();
+                              setHostDurationSec(opt.sec);
+                            }}
+                            className={`px-2 py-1 rounded text-[11px] font-bold cursor-pointer ${
+                              hostDurationSec === opt.sec
+                                ? 'bg-amber-400 text-slate-950 font-black'
+                                : 'text-slate-300 hover:bg-white/10'
+                            }`}
+                          >
+                            {opt.label}
+                          </button>
+                        ))}
+                      </div>
+                      {activeEdition === 'senior' && (
+                        <div className="flex items-center gap-1 bg-amber-950/50 p-1 rounded-lg border border-amber-400/30">
+                          <span className="text-[10px] font-bold text-amber-200 px-1">🎵 Klipp:</span>
+                          {[20, 30, 60, 90].map((sec) => (
+                            <button
+                              key={sec}
+                              type="button"
+                              onClick={() => {
+                                sounds.playClick();
+                                setQuizClipDurationSec(sec);
+                              }}
+                              className={`px-2 py-1 rounded text-[11px] font-black cursor-pointer ${
+                                quizClipDurationSec === sec
+                                  ? 'bg-amber-400 text-slate-950'
+                                  : 'text-amber-200 hover:bg-white/10'
+                              }`}
+                            >
+                              {sec}s
+                            </button>
+                          ))}
+                        </div>
+                      )}
                       <button
                         type="button"
                         onClick={() => {
@@ -958,7 +1125,7 @@ export const QuizGameModal: React.FC<QuizGameModalProps> = ({
                 {/* ===================================================== */}
                 {/* HOST MIMELEK PANEL (KATOLSKE JULE-MIMEORD)            */}
                 {/* ===================================================== */}
-                {hostActivityMode === 'mime' && (() => {
+                {activeEdition === 'christmas' && hostActivityMode === 'mime' && (() => {
                   const mimeState = snapshot?.mimeState;
                   const currentTurnTeam = teams[activeMimeTeamIdx] || teams[0];
                   const nextTurnTeam = teams[(activeMimeTeamIdx + 1) % teams.length] || teams[0];
@@ -1249,13 +1416,10 @@ export const QuizGameModal: React.FC<QuizGameModalProps> = ({
 
                 {/* Full Question List & Answer Key Drawer */}
                 {hostActivityMode === 'quiz' && showQuestionList && (() => {
-                  const categories: Array<'Alle' | QuizCategory> = [
-                    'Alle',
-                    'Musikk',
-                    'Kultur',
-                    'Fans & Popkultur',
-                    'Ordlek & Humor',
-                  ];
+                  const categories: Array<'Alle' | QuizCategory> =
+                    activeEdition === 'senior'
+                      ? ['Alle', 'Musikk-gjetting', 'Grenland & Skien', 'Ungdomsminner', 'Allmennkunnskap']
+                      : ['Alle', 'Musikk', 'Kultur', 'Fans & Popkultur', 'Ordlek & Humor'];
                   const searchLower = questionSearch.trim().toLowerCase();
                   const filteredEntries = questions
                     .map((q, idx) => ({ q, idx }))
@@ -1280,14 +1444,28 @@ export const QuizGameModal: React.FC<QuizGameModalProps> = ({
                     <div className="p-4 rounded-2xl bg-black/50 border border-amber-400/30 space-y-3">
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <div className="text-xs font-bold text-amber-300">
-                          Arrangørens oversikt & fasit ({filteredEntries.length} av {questions.length} ·{' '}
+                          Arrangørens oversikt &amp; fasit ({filteredEntries.length} av {questions.length} ·{' '}
                           {activeEdition === 'adult'
                             ? 'QUIZ'
                             : activeEdition === 'family'
                               ? 'Familie & Barn'
-                              : 'JuleQuiz — Katolsk Familiequiz'})
+                              : activeEdition === 'senior'
+                                ? 'Senior Grenland Quiz'
+                                : 'JuleQuiz — Katolsk Familiequiz'})
                         </div>
                         <div className="flex items-center gap-1.5 flex-wrap">
+                          {activeEdition === 'senior' && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setShowQuestionList(false);
+                                handleRandomQuestion('music');
+                              }}
+                              className="px-3 py-1.5 rounded-lg bg-amber-400 hover:bg-amber-300 text-slate-950 font-bold text-xs cursor-pointer transition-colors"
+                            >
+                              🎵 Tilfeldig Musikkspørsmål
+                            </button>
+                          )}
                           <button
                             type="button"
                             onClick={() => {
@@ -1315,9 +1493,9 @@ export const QuizGameModal: React.FC<QuizGameModalProps> = ({
                               handleRandomQuestion('all');
                             }}
                             className="px-3 py-1.5 rounded-lg bg-cyan-400 hover:bg-cyan-300 text-slate-950 font-bold text-xs cursor-pointer transition-colors"
-                            title="Trekk tilfeldig mellom flervalg og skriv-svar kun fra denne quizen"
+                            title="Trekk tilfeldig mellom musikkspørsmål, flervalg og skriv-svar i denne quizen"
                           >
-                            🎲 Tilfeldig (Alle i quizen)
+                            🎲 Tilfeldig (Blandet)
                           </button>
                         </div>
                       </div>
@@ -1458,14 +1636,14 @@ export const QuizGameModal: React.FC<QuizGameModalProps> = ({
                         <div className="font-mono tabular-nums font-black text-base text-white">
                           {phase === 'question' ? (
                             <span className={remainingSec <= 10 ? 'text-rose-400' : 'text-emerald-300'}>
-                              ⏱️ {remainingSec}s / 60s
+                              ⏱️ {remainingSec}s / {effectiveDurationSec}s
                             </span>
                           ) : phase === 'reveal' ? (
                             <span className="text-emerald-300">✓ Fasit vist</span>
                           ) : phase === 'finished' ? (
                             <span className="text-amber-300">🏆 Finale</span>
                           ) : (
-                            <span className="text-slate-400">Klar til start (60s runde)</span>
+                            <span className="text-slate-400">Klar til start ({effectiveDurationSec}s runde)</span>
                           )}
                         </div>
                       </div>
@@ -1480,6 +1658,155 @@ export const QuizGameModal: React.FC<QuizGameModalProps> = ({
                           />
                         </div>
                       )}
+
+                      {activeHostQ.musicSongId && (() => {
+                        const linkedSong = MUSIC_BINGO_SONGS.find((s) => s.id === activeHostQ.musicSongId);
+                        if (!linkedSong) return null;
+                        const isThisPlaying = clipPlayer.currentSongId === linkedSong.id && clipPlayer.isPlaying;
+                        const isThisLoading = clipPlayer.currentSongId === linkedSong.id && clipPlayer.isLoading;
+                        const customClip = clipPlayer.customClips[linkedSong.id];
+                        const fmtSec = (s: number) => {
+                          const whole = Math.max(0, Math.floor(s));
+                          return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, '0')}`;
+                        };
+                        return (
+                          <div className="p-3.5 rounded-xl bg-gradient-to-r from-amber-950/60 via-emerald-950/40 to-black/60 border border-amber-400/50 space-y-2.5">
+                            <input
+                              ref={quizAudioFileInputRef}
+                              type="file"
+                              accept="audio/*,.mp3,.m4a,.wav,.ogg,.aac"
+                              className="hidden"
+                              onChange={async (e) => {
+                                const file = e.target.files?.[0];
+                                const targetId = pendingAudioSongIdRef.current;
+                                e.target.value = '';
+                                if (!file || !targetId) return;
+                                await musicClipPlayer.saveSongAudioFile(targetId, file);
+                                const targetSong = MUSIC_BINGO_SONGS.find((s) => s.id === targetId);
+                                if (targetSong) {
+                                  void musicClipPlayer.playSongClip(targetSong, quizClipDurationSec);
+                                }
+                              }}
+                            />
+                            <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                              <div>
+                                <div className="font-black text-amber-300 uppercase tracking-wider">
+                                  🎵 Musikk-gjettespørsmål · Lydklipp i appen ({quizClipDurationSec} sek)
+                                </div>
+                                {activeHostQ.musicHint && (
+                                  <div className="text-amber-100/80 text-[11px] mt-0.5">
+                                    Hint som vises på skjerm: {activeHostQ.musicHint}
+                                  </div>
+                                )}
+                                {!hideSecretsOnHostDesktop && (
+                                  <div className="text-emerald-300 font-bold text-[11px] mt-0.5">
+                                    Låt: «{linkedSong.title}» — {linkedSong.artist}
+                                  </div>
+                                )}
+                              </div>
+
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <div className="flex items-center gap-1 bg-black/45 p-1 rounded-lg border border-amber-400/30">
+                                  <span className="text-[10px] font-bold text-amber-200 px-1">Klipp:</span>
+                                  {[20, 30, 60, 90].map((sec) => (
+                                    <button
+                                      key={sec}
+                                      type="button"
+                                      onClick={() => {
+                                        sounds.playClick();
+                                        setQuizClipDurationSec(sec);
+                                      }}
+                                      className={`px-2 py-0.5 rounded text-[11px] font-black cursor-pointer ${
+                                        quizClipDurationSec === sec
+                                          ? 'bg-amber-400 text-slate-950'
+                                          : 'text-amber-200 hover:bg-white/10'
+                                      }`}
+                                    >
+                                      {sec}s
+                                    </button>
+                                  ))}
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    if (isThisPlaying) {
+                                      musicClipPlayer.togglePlayPause();
+                                    } else {
+                                      void musicClipPlayer.playSongClip(linkedSong, quizClipDurationSec);
+                                    }
+                                  }}
+                                  disabled={isThisLoading}
+                                  className={`px-3 py-1.5 rounded-lg font-black text-xs cursor-pointer transition-colors ${
+                                    isThisPlaying
+                                      ? 'bg-amber-400 hover:bg-amber-300 text-slate-950'
+                                      : 'bg-emerald-400 hover:bg-emerald-300 text-slate-950'
+                                  }`}
+                                >
+                                  {isThisLoading
+                                    ? '⏳ Laster klipp...'
+                                    : isThisPlaying
+                                      ? '⏸️ Pause klipp'
+                                      : `▶️ Spill lydklipp (${quizClipDurationSec}s)`}
+                                </button>
+                                {(isThisPlaying || clipPlayer.currentSongId === linkedSong.id) && clipPlayer.currentTimeSec > 0 && (
+                                  <button
+                                    type="button"
+                                    onClick={() => musicClipPlayer.stop()}
+                                    className="px-2.5 py-1.5 rounded-lg bg-rose-500/25 hover:bg-rose-500/40 border border-rose-400/50 text-rose-100 font-bold text-xs cursor-pointer"
+                                    title="Stopp lydavspilling"
+                                  >
+                                    ⏹️ Stopp
+                                  </button>
+                                )}
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    pendingAudioSongIdRef.current = linkedSong.id;
+                                    quizAudioFileInputRef.current?.click();
+                                  }}
+                                  className="px-2.5 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 border border-white/20 text-amber-100 font-bold text-[11px] cursor-pointer"
+                                  title="Last opp din egen MP3/M4A/WAV til denne sangen"
+                                >
+                                  📁 {customClip ? 'Bytt lydfil' : 'Egen lydfil'}
+                                </button>
+                              </div>
+                            </div>
+
+                            {clipPlayer.currentSongId === linkedSong.id && clipPlayer.durationSec > 0 && (
+                              <div className="space-y-1">
+                                <input
+                                  type="range"
+                                  min={0}
+                                  max={Math.max(1, Math.floor(clipPlayer.durationSec))}
+                                  value={Math.floor(clipPlayer.currentTimeSec)}
+                                  onChange={(e) => musicClipPlayer.seekTo(Number(e.target.value))}
+                                  className="w-full accent-emerald-400 cursor-pointer h-1.5"
+                                  aria-label="Spol i lydklipp"
+                                />
+                                <div className="flex items-center justify-between text-[11px] font-mono text-emerald-200/90">
+                                  <span>{clipPlayer.sourceLabel || 'Lydklipp i appen'}</span>
+                                  <span>
+                                    {fmtSec(clipPlayer.currentTimeSec)} / {fmtSec(clipPlayer.durationSec)}
+                                  </span>
+                                </div>
+                              </div>
+                            )}
+
+                            {clipPlayer.notice && (
+                              <div className="p-2 rounded-lg bg-amber-500/15 border border-amber-400/40 text-[11px] text-amber-100 flex items-center justify-between gap-2">
+                                <span>{clipPlayer.notice}</span>
+                                <button
+                                  type="button"
+                                  onClick={() => musicClipPlayer.clearNotice()}
+                                  className="text-amber-300 hover:text-white font-bold cursor-pointer shrink-0"
+                                >
+                                  ✕
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
 
                       <h3 className="font-heading font-bold text-base sm:text-lg text-white leading-snug">
                         {activeHostQ.question}
@@ -1631,8 +1958,10 @@ export const QuizGameModal: React.FC<QuizGameModalProps> = ({
                             className="px-5 py-3 rounded-xl bg-emerald-400 hover:bg-emerald-300 text-slate-950 font-black text-sm cursor-pointer transition-colors"
                           >
                             {randomOrderEnabled
-                              ? '🎲 Trekk neste spørsmål (Tilfeldig · 60 sek)'
-                              : `▶ Start Spørsmål ${selectedQuestionIdx + 1} (60 sek)`}
+                              ? activeEdition === 'senior'
+                                ? `🎲 Trekk blandet (Musikk + Quiz · ${hostDurationSec} sek)`
+                                : `🎲 Trekk neste spørsmål (Tilfeldig · ${hostDurationSec} sek)`
+                              : `▶ Start Spørsmål ${selectedQuestionIdx + 1} (${hostDurationSec} sek)`}
                           </button>
                         )}
 
@@ -1671,7 +2000,9 @@ export const QuizGameModal: React.FC<QuizGameModalProps> = ({
                               className="px-5 py-3 rounded-xl bg-emerald-400 hover:bg-emerald-300 text-slate-950 font-black text-sm cursor-pointer transition-colors"
                             >
                               {randomOrderEnabled
-                                ? `🎲 Neste tilfeldige spørsmål (${drawnQuestionIds.length}/${questions.length} trukket)`
+                                ? activeEdition === 'senior'
+                                  ? `🎲 Neste tilfeldige (Musikk + Quiz · ${drawnQuestionIds.length}/${questions.length})`
+                                  : `🎲 Neste tilfeldige spørsmål (${drawnQuestionIds.length}/${questions.length} trukket)`
                                 : (snapshot?.questionIndex ?? 0) + 1 < questions.length
                                 ? `➔ Neste spørsmål (${(snapshot?.questionIndex ?? 0) + 2} av ${questions.length})`
                                 : '🏆 Avslutt & Vis Vinnerpodium'}
@@ -1681,6 +2012,15 @@ export const QuizGameModal: React.FC<QuizGameModalProps> = ({
 
                         {(phase === 'lobby' || phase === 'reveal') && (
                           <>
+                            {activeEdition === 'senior' && (
+                              <button
+                                type="button"
+                                onClick={() => handleRandomQuestion('music')}
+                                className="px-3.5 py-3 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-400/50 text-xs font-bold text-amber-200 cursor-pointer transition-colors"
+                              >
+                                🎵 Tilfeldig Musikk
+                              </button>
+                            )}
                             <button
                               type="button"
                               onClick={() => handleRandomQuestion('multiple_choice')}
@@ -1703,6 +2043,7 @@ export const QuizGameModal: React.FC<QuizGameModalProps> = ({
                             type="button"
                             onClick={() => {
                               sounds.playClick();
+                              musicClipPlayer.stop();
                               setSelectedQuestionIdx(0);
                               setActivePreparedQ(null);
                               quizService.resetGame(activeEdition);
@@ -1732,7 +2073,7 @@ export const QuizGameModal: React.FC<QuizGameModalProps> = ({
                       👥 {(snapshot?.participants || []).length} deltakere med kode
                     </span>
                   </div>
-                  <div className="space-y-1.5">
+                  <div className="space-y-1.5 max-h-60 overflow-y-auto pr-1">
                     {sortedLeaderboard.map((team, rankIdx) => {
                       const style = TEAM_STYLE[team.color];
                       const score = snapshot?.teamScores?.[team.id] || 0;
@@ -1763,14 +2104,45 @@ export const QuizGameModal: React.FC<QuizGameModalProps> = ({
 
                 {/* Team Status & Rename */}
                 <div className="p-4 rounded-2xl bg-white/5 border border-white/10 space-y-3">
-                  <div className="flex items-center justify-between">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
                     <h4 className="font-heading font-bold text-sm text-white">
-                      Lagoppsett & Poengstyring
+                      Lag &amp; Bordoppsett ({teams.length} bord/lag)
                     </h4>
-                    <span className="text-xs text-slate-400">Én skjerm per lag eller online</span>
+                    <span className="text-[11px] text-slate-300">4–5 personer per bordskjerm</span>
                   </div>
 
-                  <div className="space-y-2">
+                  {/* Quick Hall Presets for 50+ hall */}
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {[
+                      { count: 4, label: '4 lag' },
+                      { count: 8, label: '8 bord' },
+                      { count: 12, label: '12 bord (50+ sal)' },
+                      { count: 15, label: '15 bord' },
+                    ].map((preset) => (
+                      <button
+                        key={preset.count}
+                        type="button"
+                        onClick={() => handlePresetTables(preset.count)}
+                        className={`px-2.5 py-1 rounded-lg text-[11px] font-bold cursor-pointer border ${
+                          teams.length === preset.count
+                            ? 'bg-amber-400 text-slate-950 border-white font-black'
+                            : 'bg-black/40 border-white/15 text-slate-200 hover:bg-white/10'
+                        }`}
+                      >
+                        {preset.label}
+                      </button>
+                    ))}
+                    <button
+                      type="button"
+                      onClick={handleAddSingleTable}
+                      disabled={teams.length >= 25}
+                      className="px-2.5 py-1 rounded-lg bg-emerald-500/25 hover:bg-emerald-500/35 border border-emerald-400/50 text-emerald-100 text-[11px] font-black cursor-pointer disabled:opacity-40"
+                    >
+                      + Bord
+                    </button>
+                  </div>
+
+                  <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
                     {teams.map((team) => {
                       const style = TEAM_STYLE[team.color];
                       const hasAnswered = snapshot?.answeredTeamIds?.includes(team.id);
@@ -1908,11 +2280,13 @@ export const QuizGameModal: React.FC<QuizGameModalProps> = ({
                         ? '🎭 QUIZ — Kultur-, Musikk- & Fanquiz'
                         : activeEdition === 'family'
                           ? '🎈 Familie- & Barnequiz — Kultur, Musikk & Ordlek'
-                          : `🎄 JuleQuiz — Katolsk Familiequiz & ${CHRISTMAS_MIME_CARDS.length} Mimelek`}
+                          : activeEdition === 'senior'
+                            ? '👵🎵 Senior Grenland Quiz — Musikk-gjetting, Lokalhistorie & Skriv-svar'
+                            : `🎄 JuleQuiz — Katolsk Familiequiz & ${CHRISTMAS_MIME_CARDS.length} Mimelek`}
                     </div>
                     <div className="text-xs text-slate-400 mt-0.5">
                       Vert: {snapshot?.hostName || 'Arrangør'} ·{' '}
-                      {snapshot?.mimeState?.active
+                      {activeEdition === 'christmas' && snapshot?.mimeState?.active
                         ? `🎭 Mimelek Runde ${snapshot.mimeState.roundNumber}`
                         : `Spørsmål ${Math.min((snapshot?.questionIndex ?? 0) + 1, questions.length)} av ${questions.length}`}
                     </div>
@@ -1955,7 +2329,7 @@ export const QuizGameModal: React.FC<QuizGameModalProps> = ({
                 </div>
 
                 {/* Big Screen MIMELEK Stage (never leaks secret word before reveal!) */}
-                {snapshot?.mimeState?.active ? (
+                {activeEdition === 'christmas' && snapshot?.mimeState?.active ? (
                   <div className="py-6 text-center space-y-5">
                     {snapshot.mimeState.status === 'choosing' && (
                       <>
@@ -2018,18 +2392,28 @@ export const QuizGameModal: React.FC<QuizGameModalProps> = ({
                 {phase === 'lobby' && (
                   <div className="py-10 text-center space-y-4">
                     <div className="text-5xl">
-                      {activeEdition === 'adult' ? '🎤' : activeEdition === 'family' ? '🎉' : '🎄'}
+                      {activeEdition === 'adult'
+                        ? '🎤'
+                        : activeEdition === 'family'
+                        ? '🎉'
+                        : activeEdition === 'senior'
+                        ? '👵'
+                        : '🎄'}
                     </div>
                     <h3 className="font-heading font-black text-2xl sm:text-3xl text-white">
-                      {activeEdition === 'christmas' ? 'Velkommen til JuleQuiz!' : 'Velkommen til lagquiz!'}
+                      {activeEdition === 'christmas'
+                        ? 'Velkommen til JuleQuiz!'
+                        : activeEdition === 'senior'
+                        ? 'Velkommen til Senior Grenland Quiz!'
+                        : 'Velkommen til lagquiz!'}
                       {showCodeOnBigScreen && roomCode && (
                         <>
                           {' '}Koble til med kode <span className="font-mono text-amber-300">{roomCode}</span>
                         </>
                       )}
                     </h3>
-                    <p className="text-sm text-slate-300 max-w-xl mx-auto">
-                      Samle laget rundt én skjerm (f.eks. Rødt lag eller Blått lag) eller bli med hver for dere på mobil. Dere får <strong>60 sekunder</strong> på hvert spørsmål!
+                    <p className="text-sm sm:text-base text-slate-300 max-w-2xl mx-auto">
+                      Samle <strong>4–5 personer rundt én skjerm</strong> (f.eks. Bord 1, Bord 2 eller et fargelag). Dere får <strong>{effectiveDurationSec} sekunder</strong> til å snakke sammen og svare på hvert spørsmål!
                     </p>
                     <div className="text-xs text-emerald-300 font-bold">
                       Tilkoblede deltakere: {(snapshot?.participants || []).length}
@@ -2051,14 +2435,41 @@ export const QuizGameModal: React.FC<QuizGameModalProps> = ({
                     )}
 
                     <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-bold">
-                      <span className="text-amber-300">{publicQuestion.category}</span>
+                      <span className="text-amber-300">{getCategoryDisplayLabel(publicQuestion.category as QuizCategory)}</span>
                       {publicQuestion.questionType === 'open_text' && (
                         <span className="text-fuchsia-300">
                           ✍️ Skriv-svar (AhaSlides Live på Storskjerm)
                         </span>
                       )}
                     </div>
-                    <h3 className="font-heading font-black text-xl sm:text-2xl text-white leading-snug">
+
+                    {publicQuestion.musicSongId && (() => {
+                      const revealedSong =
+                        phase === 'reveal'
+                          ? MUSIC_BINGO_SONGS.find((s) => s.id === publicQuestion.musicSongId)
+                          : null;
+                      return (
+                        <div className="p-4 rounded-2xl bg-gradient-to-r from-amber-500/20 via-emerald-500/15 to-amber-500/20 border-2 border-amber-400/60 flex flex-wrap items-center justify-between gap-2">
+                          <div className="flex items-center gap-2.5">
+                            <span className="text-2xl">🔊</span>
+                            <div>
+                              <div className="text-xs sm:text-sm font-black text-amber-200 uppercase tracking-wider">
+                                {phase === 'reveal' && revealedSong
+                                  ? `🎶 Låten var: «${revealedSong.title}» — ${revealedSong.artist} (${revealedSong.decade})`
+                                  : '🎵 LYDSPØRSMÅL · Lytt til melodien & les spørsmålet under!'}
+                              </div>
+                              {publicQuestion.musicHint && (
+                                <div className="text-xs sm:text-sm text-amber-100/90 font-semibold">
+                                  💡 Hint: {publicQuestion.musicHint}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })()}
+
+                    <h3 className="font-heading font-black text-xl sm:text-3xl text-white leading-snug">
                       {publicQuestion.question}
                     </h3>
 
@@ -2188,7 +2599,13 @@ export const QuizGameModal: React.FC<QuizGameModalProps> = ({
                 )}
 
                 {/* Team Live Score & Answered Bar */}
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2 border-t border-white/10">
+                <div
+                  className={`grid gap-3 pt-2 border-t border-white/10 ${
+                    teams.length > 6
+                      ? 'grid-cols-2 sm:grid-cols-4 lg:grid-cols-6'
+                      : 'grid-cols-2 sm:grid-cols-4'
+                  }`}
+                >
                   {teams.map((team) => {
                     const style = TEAM_STYLE[team.color];
                     const answered = snapshot?.answeredTeamIds?.includes(team.id);
@@ -2295,7 +2712,7 @@ export const QuizGameModal: React.FC<QuizGameModalProps> = ({
                   )}
                 </div>
 
-                {snapshot?.mimeState?.active ? (
+                {activeEdition === 'christmas' && snapshot?.mimeState?.active ? (
                   <div className="py-6 text-center space-y-3">
                     <div className="text-4xl">
                       {snapshot.mimeState.status === 'choosing'
@@ -2352,13 +2769,38 @@ export const QuizGameModal: React.FC<QuizGameModalProps> = ({
 
                     <div className="flex flex-wrap items-center justify-between gap-1 text-xs font-bold">
                       <span className="text-amber-300">
-                        Spørsmål {(snapshot?.questionIndex ?? 0) + 1} av {questions.length} · {publicQuestion.category}
+                        Spørsmål {(snapshot?.questionIndex ?? 0) + 1} av {questions.length} · {getCategoryDisplayLabel(publicQuestion.category as QuizCategory)}
                       </span>
                       {publicQuestion.questionType === 'open_text' && (
                         <span className="text-fuchsia-300">✍️ Skriv svar (AhaSlides)</span>
                       )}
                     </div>
-                    <h4 className="font-heading font-bold text-base sm:text-lg text-white leading-snug">
+
+                    {publicQuestion.musicSongId && (() => {
+                      const revealedSong =
+                        phase === 'reveal'
+                          ? MUSIC_BINGO_SONGS.find((s) => s.id === publicQuestion.musicSongId)
+                          : null;
+                      return (
+                        <div className="p-3 rounded-2xl bg-amber-500/20 border border-amber-400/60 flex items-start gap-2.5">
+                          <span className="text-xl shrink-0">🔊</span>
+                          <div className="text-xs">
+                            <div className="font-black text-amber-200 uppercase tracking-wide">
+                              {phase === 'reveal' && revealedSong
+                                ? `🎶 Låten var: «${revealedSong.title}» — ${revealedSong.artist}`
+                                : '🎵 Musikk-gjetting · Lytt & svar på spørsmålet under!'}
+                            </div>
+                            {publicQuestion.musicHint && (
+                              <div className="text-amber-100/90 mt-0.5 font-medium">
+                                💡 {publicQuestion.musicHint}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })()}
+
+                    <h4 className="font-heading font-bold text-lg sm:text-xl text-white leading-snug">
                       {publicQuestion.question}
                     </h4>
 
@@ -2443,7 +2885,7 @@ export const QuizGameModal: React.FC<QuizGameModalProps> = ({
                               type="button"
                               disabled={phase !== 'question' || remainingSec <= 0}
                               onClick={() => handleTeamAnswer(idx)}
-                              className={`w-full min-h-[48px] p-3.5 rounded-xl border-2 text-left font-bold text-sm flex items-center justify-between gap-2 transition-all cursor-pointer disabled:cursor-default ${
+                              className={`w-full min-h-[54px] p-4 rounded-xl border-2 text-left font-bold text-sm sm:text-base flex items-center justify-between gap-2 transition-all cursor-pointer disabled:cursor-default ${
                                 isCorrect
                                   ? 'bg-emerald-500/30 border-emerald-400 text-white'
                                   : isWrongPick
@@ -2470,7 +2912,7 @@ export const QuizGameModal: React.FC<QuizGameModalProps> = ({
 
                     {phase === 'question' && remainingSec <= 0 && (
                       <div className="p-3 rounded-xl bg-black/50 text-xs text-amber-200 font-bold text-center">
-                        ⏰ Tiden (60 sekunder) er ute! Venter på at arrangøren viser fasit.
+                        ⏰ Tiden ({effectiveDurationSec} sekunder) er ute! Venter på at arrangøren viser fasit.
                       </div>
                     )}
 
@@ -2571,18 +3013,42 @@ export const QuizGameModal: React.FC<QuizGameModalProps> = ({
 
                 <div>
                   <label className="text-xs font-bold text-amber-300 block mb-1.5">
-                    Velg lagfarge / lag:
+                    Velg Bord (4–5 personer per skjerm) eller Fargelag:
                   </label>
+                  <div className="grid grid-cols-4 gap-1.5 mb-2.5">
+                    {Array.from({ length: 16 }, (_, idx) => idx + 1).map((num) => {
+                      const active = selectedTableNumber === num;
+                      return (
+                        <button
+                          key={num}
+                          type="button"
+                          onClick={() => {
+                            sounds.playClick();
+                            setSelectedTableNumber(active ? null : num);
+                          }}
+                          className={`min-h-[40px] px-2 py-1.5 rounded-xl border text-xs font-bold cursor-pointer transition-all ${
+                            active
+                              ? 'bg-amber-400 text-slate-950 border-white font-black shadow'
+                              : 'bg-black/45 text-amber-100 border-white/15 hover:border-amber-400/60'
+                          }`}
+                        >
+                          Bord {num}
+                        </button>
+                      );
+                    })}
+                  </div>
+
                   <div className="grid grid-cols-2 gap-2">
                     {DEFAULT_QUIZ_TEAMS.map((t) => {
                       const style = TEAM_STYLE[t.color];
-                      const active = joinTeamId === t.id;
+                      const active = selectedTableNumber === null && joinTeamId === t.id;
                       return (
                         <button
                           key={t.id}
                           type="button"
                           onClick={() => {
                             sounds.playClick();
+                            setSelectedTableNumber(null);
                             setJoinTeamId(t.id);
                           }}
                           className={`min-h-[44px] px-3 py-2 rounded-xl border text-xs font-bold cursor-pointer flex items-center justify-center gap-1.5 transition-all ${
@@ -2601,13 +3067,13 @@ export const QuizGameModal: React.FC<QuizGameModalProps> = ({
 
                 <div>
                   <label className="text-xs font-bold text-slate-300 block mb-1">
-                    Valgfritt eget lagnavn:
+                    Valgfritt eget bord-/lagnavn (4–5 stk sammen):
                   </label>
                   <input
                     type="text"
                     value={customTeamName}
                     onChange={(e) => setCustomTeamName(e.target.value)}
-                    placeholder="La stå tom for standard (f.eks. Rødt lag)"
+                    placeholder={selectedTableNumber ? `Bord ${selectedTableNumber} (eller skriv eget navn)` : 'f.eks. Bord 7 Skien eller Rødt lag'}
                     maxLength={28}
                     className="w-full px-4 py-2 rounded-xl bg-black/60 border border-white/15 focus:border-amber-400 text-xs text-white outline-none"
                   />

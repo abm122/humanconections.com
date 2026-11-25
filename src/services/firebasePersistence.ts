@@ -494,7 +494,7 @@ class FirebasePersistenceService {
     activeGame?: 'bingo' | 'quiz';
     hasBingo?: boolean;
     hasQuiz?: boolean;
-    edition?: 'adult' | 'family' | 'christmas';
+    edition?: 'adult' | 'family' | 'christmas' | 'senior';
     calledBallNumbers?: number[];
     playersSummary?: Array<{ name: string; linesCompleted: number; hasBingo: boolean }>;
     quizState?: Record<string, unknown> | null;
@@ -515,8 +515,10 @@ class FirebasePersistenceService {
     ).slice(0, 75);
 
     const activeGame: 'bingo' | 'quiz' = params.activeGame === 'quiz' ? 'quiz' : 'bingo';
-    const edition: 'adult' | 'family' | 'christmas' =
-      params.edition === 'family' || params.edition === 'christmas' ? params.edition : 'adult';
+    const edition: 'adult' | 'family' | 'christmas' | 'senior' =
+      params.edition === 'family' || params.edition === 'christmas' || params.edition === 'senior'
+        ? params.edition
+        : 'adult';
     const cleanHostName = (params.hostName || 'Arrangør').trim().slice(0, 60) || 'Arrangør';
     const ttl = Math.max(60_000, Number(params.ttlMs) || 24 * 60 * 60 * 1000);
     const expiresAtMs = Date.now() + ttl;
@@ -584,7 +586,7 @@ class FirebasePersistenceService {
     activeGame: 'bingo' | 'quiz';
     hasBingo: boolean;
     hasQuiz: boolean;
-    edition: 'adult' | 'family' | 'christmas';
+    edition: 'adult' | 'family' | 'christmas' | 'senior';
     calledBallNumbers: number[];
     playersSummary?: Array<{
       id?: string;
@@ -622,7 +624,10 @@ class FirebasePersistenceService {
         activeGame: d.activeGame === 'quiz' ? 'quiz' : 'bingo',
         hasBingo: d.hasBingo !== false,
         hasQuiz: d.hasQuiz !== false,
-        edition: d.edition === 'family' || d.edition === 'christmas' ? d.edition : 'adult',
+        edition:
+          d.edition === 'family' || d.edition === 'christmas' || d.edition === 'senior'
+            ? d.edition
+            : 'adult',
         calledBallNumbers: Array.isArray(d.calledBallNumbers)
           ? d.calledBallNumbers.map((n: unknown) => Math.trunc(Number(n))).filter((n: number) => n >= 1 && n <= 75)
           : [],
@@ -645,7 +650,7 @@ class FirebasePersistenceService {
       activeGame: 'bingo' | 'quiz';
       hasBingo: boolean;
       hasQuiz: boolean;
-      edition: 'adult' | 'family' | 'christmas';
+      edition: 'adult' | 'family' | 'christmas' | 'senior';
       calledBallNumbers: number[];
       playersSummary?: Array<{
         id?: string;
@@ -686,7 +691,10 @@ class FirebasePersistenceService {
           activeGame: d.activeGame === 'quiz' ? 'quiz' : 'bingo',
           hasBingo: d.hasBingo !== false,
           hasQuiz: d.hasQuiz !== false,
-          edition: d.edition === 'family' || d.edition === 'christmas' ? d.edition : 'adult',
+          edition:
+            d.edition === 'family' || d.edition === 'christmas' || d.edition === 'senior'
+              ? d.edition
+              : 'adult',
           calledBallNumbers: Array.isArray(d.calledBallNumbers)
             ? d.calledBallNumbers.map((n: unknown) => Math.trunc(Number(n))).filter((n: number) => n >= 1 && n <= 75)
             : [],

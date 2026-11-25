@@ -762,6 +762,19 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
                           <span>🎄</span>
                           <span>{ts.christmasQuizLabel}</span>
                         </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            sounds.playClick();
+                            setIsQuizMenuOpen(false);
+                            onOpenQuiz('senior', hasFullPaid ? 'host' : 'join');
+                          }}
+                          className="w-full px-3 py-2 rounded-xl text-xs font-black text-amber-200 hover:bg-amber-500/25 flex items-center gap-2 cursor-pointer"
+                          title={ts.seniorQuizTitle}
+                        >
+                          <span>👵</span>
+                          <span>{ts.seniorQuizLabel}</span>
+                        </button>
                       </>
                     )}
                     {onOpenMemory && (

@@ -12,6 +12,7 @@ import {
   CHRISTMAS_MIME_CARDS,
   CHRISTMAS_QUIZ_QUESTIONS,
   FAMILY_QUIZ_QUESTIONS,
+  SENIOR_QUIZ_QUESTIONS,
 } from '../data/quizQuestions';
 
 interface GameModeSelectorModalProps {
@@ -23,6 +24,7 @@ interface GameModeSelectorModalProps {
   onSelectAdultQuiz?: () => void;
   onSelectFamilyQuiz?: () => void;
   onSelectChristmasQuiz?: () => void;
+  onSelectSeniorQuiz?: () => void;
   onSelectMemory?: () => void;
   onSelectClassicBoard: () => void;
 }
@@ -36,6 +38,7 @@ export const GameModeSelectorModal: React.FC<GameModeSelectorModalProps> = ({
   onSelectAdultQuiz,
   onSelectFamilyQuiz,
   onSelectChristmasQuiz,
+  onSelectSeniorQuiz,
   onSelectMemory,
   onSelectClassicBoard,
 }) => {
@@ -130,10 +133,10 @@ export const GameModeSelectorModal: React.FC<GameModeSelectorModalProps> = ({
                 </div>
                 <div>
                   <h4 className="font-heading font-black text-sm sm:text-base text-amber-100">
-                    1. Storskjerm Bingo
+                    1. Storskjerm Bingo &amp; Digital Musikkbingo (50+ sal)
                   </h4>
                   <p className="text-xs text-amber-200/80 mt-0.5 leading-relaxed">
-                    Projektor / TV · 3D-trommel, kuleoppleser, stor talltavle, musikk og vinnerfeiringer.
+                    Projektor / TV · 3D-trommel, <strong>🎵 Musikkbingo for eldre (60 sanger, Spotify &amp; 50–100 papirbrett)</strong>, stor talltavle og vinnerfeiringer.
                   </p>
                 </div>
               </div>
@@ -305,6 +308,38 @@ export const GameModeSelectorModal: React.FC<GameModeSelectorModalProps> = ({
                   className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-gradient-to-r from-sky-400 to-cyan-400 hover:brightness-110 active:scale-95 text-slate-950 font-black text-xs sm:text-sm shrink-0 cursor-pointer shadow-lg transition-all flex items-center justify-center gap-1.5 whitespace-nowrap"
                 >
                   <span>Start Memory</span>
+                  <span>➔</span>
+                </button>
+              </div>
+            )}
+
+            {/* OPTION 7: SENIOR GRENLAND QUIZ (BLANDET MUSIKKBINGO-GJETTING & LOKALQUIZ) */}
+            {onSelectSeniorQuiz && (
+              <div className="lg:col-span-2 p-4 rounded-2xl bg-gradient-to-r from-[#261a08] via-[#1a130b] to-[#0c1d1a] border-2 border-amber-400/70 hover:border-amber-300 transition-all flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-lg group">
+                <div className="flex items-start gap-3.5">
+                  <div className="w-11 h-11 rounded-2xl bg-amber-400/20 border border-amber-400/60 text-amber-200 flex items-center justify-center text-2xl shrink-0">
+                    👵
+                  </div>
+                  <div>
+                    <h4 className="font-heading font-black text-sm sm:text-base text-amber-100">
+                      7. Senior Grenland Quiz — Musikk-gjetting, Lokalhistorie &amp; Skriv-svar
+                    </h4>
+                    <p className="text-xs text-amber-100/85 mt-0.5 leading-relaxed">
+                      {SENIOR_QUIZ_QUESTIONS.length} spørsmål i én tilfeldig rekkefølge · Blandet spill med lydklipp i appen + Grenland &amp; Skien + Ungdomsminner + Skriv-svar · 4–5 per skjerm · 60–120 sek.
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    sounds.playClick();
+                    onClose();
+                    onSelectSeniorQuiz();
+                  }}
+                  className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-gradient-to-r from-amber-400 to-emerald-400 hover:brightness-110 active:scale-95 text-slate-950 font-black text-xs sm:text-sm shrink-0 cursor-pointer shadow-lg transition-all flex items-center justify-center gap-1.5 whitespace-nowrap"
+                >
+                  <span>Start Senior Grenland Quiz</span>
                   <span>➔</span>
                 </button>
               </div>

@@ -12,6 +12,7 @@ import { problemReports, ProblemReport } from '../services/problemReports';
 import { sounds } from '../audio/soundEngine';
 import { sessionTimer } from '../services/sessionTimer';
 import { authService } from '../services/authService';
+import { remoteBingo, HostActivityNotification, RemoteParticipant } from '../services/remoteBingo';
 import { VippsTestIntegrationModal } from './VippsTestIntegrationModal';
 
 interface OwnerControlModalProps {
@@ -139,6 +140,12 @@ export const OwnerControlModal: React.FC<OwnerControlModalProps> = ({
   const [stripeGatewayStatus, setStripeGatewayStatus] = useState<{ configured: boolean; isLive: boolean; isTest: boolean; mode: string; source?: string } | null>(null);
   const [stripeSaving, setStripeSaving] = useState(false);
   const [stripeSaveMsg, setStripeSaveMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [remoteParticipants, setRemoteParticipants] = useState<RemoteParticipant[]>(() =>
+    remoteBingo.getConnectedRemotePlayers()
+  );
+  const [hostNotifications, setHostNotifications] = useState<HostActivityNotification[]>(() =>
+    remoteBingo.getHostNotifications()
+  );
 
   const loadStripeStatus = () => {
     fetch('/api/stripe/status')
@@ -215,11 +222,25 @@ export const OwnerControlModal: React.FC<OwnerControlModalProps> = ({
       setIsSessionExpired(sessionTimer.isExpired());
     });
 
+    const unsubRemote = remoteBingo.subscribe(() => {
+      setRemoteParticipants([...remoteBingo.getConnectedRemotePlayers()]);
+      setHostNotifications(remoteBingo.getHostNotifications());
+    });
+
+    const unsubRemoteJoin = remoteBingo.onParticipantJoined((p, total) => {
+      if (remoteBingo.getIsRemotePlayer() || !remoteBingo.canActAsHost()) return;
+      sounds.playPop(1.2);
+      setToastMsg(`👋 ${p.name} ble med i rommet (${p.game || 'Avstandsbingo'})! (${total} tilkoblet)`);
+      setTimeout(() => setToastMsg(null), 4500);
+    });
+
     return () => {
       unsubOwner();
       unsubMonetization();
       unsubReports();
       unsubSession();
+      unsubRemote();
+      unsubRemoteJoin();
     };
   }, []);
 
@@ -951,6 +972,7 @@ export const OwnerControlModal: React.FC<OwnerControlModalProps> = ({
             onClick={() => {
               sounds.playClick();
               setActiveTab('participants');
+              remoteBingo.markHostNotificationsRead();
             }}
             className={`px-3 py-2 rounded-xl font-bold transition-all cursor-pointer flex items-center gap-1.5 whitespace-nowrap ${
               activeTab === 'participants'
@@ -959,7 +981,7 @@ export const OwnerControlModal: React.FC<OwnerControlModalProps> = ({
             }`}
           >
             <span>👥</span>
-            <span>Deltakere & Antall ({players.length})</span>
+            <span>Deltakere & Antall ({players.length + remoteParticipants.length})</span>
             {bannedList.length > 0 && (
               <span className="w-2 h-2 rounded-full bg-rose-500" />
             )}
@@ -2267,6 +2289,83 @@ export const OwnerControlModal: React.FC<OwnerControlModalProps> = ({
           {/* TAB 3: DELTAKERE & UTESTENGELSE (DISTURBANTS BANNING) */}
           {activeTab === 'participants' && (
             <div className="space-y-6">
+              {/* Live Organizer Notifications: Who joined & BINGO claims */}
+              <div className="p-4 rounded-2xl bg-gradient-to-br from-emerald-950/35 via-black/45 to-amber-950/30 border border-emerald-400/40 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <h3 className="font-heading font-black text-sm text-emerald-300">
+                    🔔 Varsler til arrangør — Hvem som ble med &amp; Bingorop ({hostNotifications.length})
+                  </h3>
+                </div>
+                {hostNotifications.length === 0 ? (
+                  <div className="text-xs text-slate-300/80 py-2">
+                    Ingen tilkoblings- eller bingovarsler ennå. Nye deltakere og bingorop vises automatisk her i sanntid.
+                  </div>
+                ) : (
+                  <div className="space-y-1.5 max-h-44 overflow-y-auto pr-1">
+                    {hostNotifications.map((item) => (
+                      <div
+                        key={item.id}
+                        className={`p-2.5 rounded-xl border text-xs flex items-center justify-between gap-2 ${
+                          item.type === 'bingo'
+                            ? 'bg-amber-500/20 border-amber-400/60 text-amber-100 font-bold'
+                            : 'bg-emerald-500/15 border-emerald-400/40 text-emerald-100'
+                        }`}
+                      >
+                        <div>
+                          <span className="mr-1.5">{item.type === 'bingo' ? '🏆' : '👋'}</span>
+                          <span>{item.detail}</span>
+                        </div>
+                        <span className="text-[10px] text-amber-200/70 shrink-0">
+                          {item.gameLabel} · {new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Remote Connected Participants (Joined via Code) */}
+              <div className="p-4 rounded-2xl bg-black/40 border border-cyan-500/30 space-y-2.5">
+                <h3 className="font-heading font-black text-sm text-cyan-200">
+                  📱 Tilkoblede eksterne deltakere med kode ({remoteParticipants.length})
+                </h3>
+                {remoteParticipants.length === 0 ? (
+                  <div className="text-xs text-slate-400">
+                    Ingen eksterne mobildeltakere tilkoblet med romkode akkurat nå.
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {remoteParticipants.map((rp) => (
+                      <div
+                        key={rp.id}
+                        className="p-2.5 rounded-xl bg-cyan-950/35 border border-cyan-400/30 flex items-center justify-between gap-2 text-xs"
+                      >
+                        <div className="flex items-center gap-2">
+                          <span
+                            className="w-3 h-3 rounded-full shrink-0"
+                            style={{ backgroundColor: rp.color || '#06b6d4' }}
+                          />
+                          <span className="font-bold text-cyan-100">{rp.name}</span>
+                          {rp.game && <span className="text-[10px] text-cyan-300/80">· {rp.game}</span>}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            sounds.playClick();
+                            remoteBingo.kickParticipant(rp.id, rp.name);
+                            ownerControl.banParticipant(rp.name, 'Utestengt fra spillrom (10 min)');
+                            showToast(`${rp.name} ble fjernet fra rommet.`);
+                          }}
+                          className="px-2.5 py-1 rounded-lg bg-rose-500/20 hover:bg-rose-500/35 border border-rose-400/40 text-rose-200 text-[11px] font-bold cursor-pointer"
+                        >
+                          🚫 Kast ut
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
               <div className="p-4 rounded-2xl bg-black/40 border border-amber-500/25">
                 <div className="flex items-center justify-between mb-3">
                   <div>

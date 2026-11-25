@@ -47,7 +47,13 @@ import { QuizGameModal } from './components/QuizGameModal';
 import { QuizEdition } from './data/quizQuestions';
 import { RemoteBingoClaimModal } from './components/RemoteBingoClaimModal';
 import { SecretOwnerLoginModal } from './components/SecretOwnerLoginModal';
-import { remoteBingo, RemoteBingoClaim, RemoteParticipant, BingoTvPlayerSummary } from './services/remoteBingo';
+import {
+  remoteBingo,
+  RemoteBingoClaim,
+  RemoteParticipant,
+  BingoTvPlayerSummary,
+  HostActivityNotification,
+} from './services/remoteBingo';
 import { quizService } from './services/quizService';
 import { firebasePersistence } from './services/firebasePersistence';
 import { GameModeSelectorModal } from './components/GameModeSelectorModal';
@@ -191,10 +197,13 @@ interface EligibleBingoClaim {
 
 function getEligibleBingoClaimForPlayer(
   player: Player | undefined,
-  calledBalls: CalledBall[]
+  calledBalls: CalledBall[],
+  roomClaimedMilestones: BingoMilestone[] = []
 ): EligibleBingoClaim | null {
   if (!player || !player.cards || player.cards.length === 0) return null;
-  const claimed = player.claimedMilestones || [];
+  const claimed = Array.from(
+    new Set<BingoMilestone>([...(player.claimedMilestones || []), ...roomClaimedMilestones])
+  );
 
   let bestFullCardIdx = -1;
   let bestFullNumbers: number[] = [];
@@ -336,21 +345,35 @@ export default function App() {
   const [isGameSelectorOpen, setIsGameSelectorOpen] = useState(false);
   const [isQuizModalOpen, setIsQuizModalOpen] = useState(false);
   const [isMemoryModalOpen, setIsMemoryModalOpen] = useState(false);
+  const [printModalConfig, setPrintModalConfig] = useState<{
+    mode?: 'music_bingo' | 'numbers' | 'both' | 'prompts';
+    count?: number;
+  }>({});
   const [quizInitialEdition, setQuizInitialEdition] = useState<QuizEdition>('adult');
   const [quizInitialTab, setQuizInitialTab] = useState<'host' | 'big_screen' | 'team_play' | 'join' | undefined>(undefined);
   const [pendingJoinCode, setPendingJoinCode] = useState<string>('');
   const [isPrivacyOpen, setIsPrivacyOpen] = useState(false);
   const [remoteBingoClaim, setRemoteBingoClaim] = useState<RemoteBingoClaim | null>(null);
   const [hostJoinNotice, setHostJoinNotice] = useState<string | null>(null);
+  const [bingoProgressionBanner, setBingoProgressionBanner] = useState<string | null>(null);
   const [roundResetNotice, setRoundResetNotice] = useState<string | null>(null);
   const [cardActionNotice, setCardActionNotice] = useState<{ text: string; tone: 'warn' | 'ready' } | null>(null);
   const cardNoticeTimerRef = useRef<number | null>(null);
   const [bingoRoundNumber, setBingoRoundNumber] = useState<number>(() => remoteBingo.getRoundNumber());
+  const [roomClaimedMilestones, setRoomClaimedMilestones] = useState<BingoMilestone[]>(() =>
+    remoteBingo.getClaimedMilestones()
+  );
+  const [milestoneWinners, setMilestoneWinners] = useState<Partial<Record<BingoMilestone, string>>>(() =>
+    remoteBingo.getMilestoneWinners()
+  );
   const [remoteParticipantsList, setRemoteParticipantsList] = useState<RemoteParticipant[]>(() =>
     remoteBingo.getConnectedRemotePlayers()
   );
   const [tvPlayersSummaryList, setTvPlayersSummaryList] = useState<BingoTvPlayerSummary[]>(() =>
     remoteBingo.getTvState()?.playersSummary || []
+  );
+  const [hostNotificationsList, setHostNotificationsList] = useState<HostActivityNotification[]>(() =>
+    remoteBingo.getHostNotifications()
   );
   const [copiedActiveShareLink, setCopiedActiveShareLink] = useState<boolean>(false);
   const [copiedActiveRoomCode, setCopiedActiveRoomCode] = useState<boolean>(false);
@@ -556,6 +579,9 @@ export default function App() {
       )
     );
     setRemoteBingoClaim(null);
+    setRoomClaimedMilestones([]);
+    setMilestoneWinners({});
+    setBingoProgressionBanner(null);
     setWinnerModalTask(null);
     setCardActionNotice(null);
     setScreen((prev) => (prev === 'VICTORY' ? 'PLAYING' : prev));
@@ -671,6 +697,9 @@ export default function App() {
       setRemoteParticipantsList([...remoteBingo.getConnectedRemotePlayers()]);
       setTvPlayersSummaryList([...(remoteBingo.getTvState()?.playersSummary || [])]);
       setBingoRoundNumber(remoteBingo.getRoundNumber());
+      setRoomClaimedMilestones(remoteBingo.getClaimedMilestones());
+      setMilestoneWinners(remoteBingo.getMilestoneWinners());
+      setHostNotificationsList(remoteBingo.getHostNotifications());
     });
 
     const unsubHostParticipantJoin = remoteBingo.onParticipantJoined((p, total) => {
@@ -678,10 +707,11 @@ export default function App() {
       const activeCode = remoteBingo.getHostCode();
       const connectedCount = remoteBingo.getConnectedRemotePlayers().length;
       sounds.playPop(1.25);
+      setHostNotificationsList(remoteBingo.getHostNotifications());
       setHostJoinNotice(
-        `👋 ${p.name} ble med med kode${activeCode ? ` ${activeCode}` : ''}! (${connectedCount || total} på mobil/nett)`
+        `👋 ${p.name} ble med i ${p.game || 'spillet'}${activeCode ? ` (kode ${activeCode})` : ''}! (${connectedCount || total} tilkoblet)`
       );
-      setTimeout(() => setHostJoinNotice(null), 5500);
+      setTimeout(() => setHostJoinNotice(null), 6000);
     });
 
     const unsubBanned = socialSocket.on('user:banned', (payload: unknown) => {
@@ -762,11 +792,44 @@ export default function App() {
 
     const unsubRemoteClaim = remoteBingo.onClaim((claim) => {
       setRemoteBingoClaim(claim);
+      const tier: BingoMilestone = claim.milestone
+        ? claim.milestone
+        : claim.isFullHouse || /fullbrett|fullt?\s*brett/i.test(claim.pattern)
+        ? 'fullbrett'
+        : /3\s*\.?\s*rekke/i.test(claim.pattern)
+        ? 'line3'
+        : 'line1';
+      if (Array.isArray(claim.claimedMilestones)) {
+        setRoomClaimedMilestones(claim.claimedMilestones);
+      } else {
+        setRoomClaimedMilestones((prev) => {
+          const s = new Set<BingoMilestone>(prev);
+          s.add(tier);
+          if (tier === 'line3' || tier === 'fullbrett') s.add('line1');
+          if (tier === 'fullbrett') s.add('line3');
+          return Array.from(s);
+        });
+      }
+      if (claim.milestoneWinners) {
+        setMilestoneWinners(claim.milestoneWinners);
+      }
+      const tierText = tier === 'fullbrett' ? 'Fullt brett' : tier === 'line3' ? '3. rekker' : '1. rekke';
+      const nextText =
+        tier === 'fullbrett'
+          ? '🔄 Ny runde starter straks!'
+          : tier === 'line3'
+          ? '➡️ Vi spiller videre til Full brett!'
+          : '➡️ Vi spiller videre til 3. rekker!';
+      setBingoProgressionBanner(
+        `🏆 ${claim.playerName} har faktisk fylt ${tierText} og trykket BINGO! ${nextText}`
+      );
+      setHostNotificationsList(remoteBingo.getHostNotifications());
     });
 
     const unsubNewRound = remoteBingo.onNewRound((ev) => {
       applyLocalNewRoundReset();
       setBingoRoundNumber(ev.roundNumber);
+      setBingoProgressionBanner(null);
       sounds.playPop(1.3);
       setRoundResetNotice(
         ev.winnerName
@@ -781,7 +844,17 @@ export default function App() {
     });
 
     const unsubClaimRejected = socialSocket.on('bingo:claim_rejected', (payload: unknown) => {
-      const data = payload as { message?: string };
+      const data = payload as {
+        message?: string;
+        claimedMilestones?: BingoMilestone[];
+        milestoneWinners?: Partial<Record<BingoMilestone, string>>;
+      };
+      if (Array.isArray(data?.claimedMilestones)) {
+        setRoomClaimedMilestones(data.claimedMilestones);
+      }
+      if (data?.milestoneWinners && typeof data.milestoneWinners === 'object') {
+        setMilestoneWinners(data.milestoneWinners);
+      }
       sounds.playClick();
       showCardActionNotice(
         data?.message || 'Alle tall i rekken må være trukket og bekreftet før du kan rope BINGO!',
@@ -889,7 +962,10 @@ export default function App() {
           const gameTarget = (urlParams.get('spill') || urlParams.get('game') || '').toLowerCase();
           const editionParam = urlParams.get('utgave') || urlParams.get('edition');
           const validEdition: QuizEdition =
-            editionParam === 'adult' || editionParam === 'family' || editionParam === 'christmas'
+            editionParam === 'adult' ||
+            editionParam === 'family' ||
+            editionParam === 'christmas' ||
+            editionParam === 'senior'
               ? editionParam
               : 'family';
 
@@ -1116,13 +1192,16 @@ export default function App() {
   }, [screen]);
 
   // Draw ball for audience screen (Host/Arrangør only)
-  const handleDrawNextBallForAudience = () => {
+  const handleDrawNextBallForAudience = (prepickedBall?: CalledBall) => {
     const isOwner = authService.getCurrentUser().role === 'owner' || ownerControl.isUnlocked();
     if (remoteBingo.getIsRemotePlayer() && !isOwner) return;
     if (!isOwner && (!authService.getCurrentUser().isAuthenticated || !sessionTimer.hasPaidAccess())) return;
     if (uncalledBalls.length === 0) return;
-    const randomIndex = Math.floor(Math.random() * uncalledBalls.length);
-    const chosen = uncalledBalls[randomIndex];
+    const chosen =
+      prepickedBall &&
+      uncalledBalls.some((b) => b.letter === prepickedBall.letter && b.number === prepickedBall.number)
+        ? prepickedBall
+        : uncalledBalls[Math.floor(Math.random() * uncalledBalls.length)];
     handleBallDrawn(chosen);
   };
 
@@ -1271,6 +1350,9 @@ export default function App() {
     setUncalledBalls(balls);
     setCalledBalls([]);
     setIsAutoCalling(false);
+    setRoomClaimedMilestones([]);
+    setMilestoneWinners({});
+    setBingoProgressionBanner(null);
 
     setScreen('PLAYING');
     sounds.playLineComplete();
@@ -1328,6 +1410,8 @@ export default function App() {
       )
     );
     setIsRemoteBingoParticipant(true);
+    setRoomClaimedMilestones(remoteBingo.getClaimedMilestones());
+    setMilestoneWinners(remoteBingo.getMilestoneWinners());
     setPlayers([remotePlayer]);
     setActivePlayerIndex(0);
     setScreen('PLAYING');
@@ -1415,7 +1499,7 @@ export default function App() {
 
     player.linesCompleted = bestCardLines;
 
-    const unlockedClaim = getEligibleBingoClaimForPlayer(player, calledBalls);
+    const unlockedClaim = getEligibleBingoClaimForPlayer(player, calledBalls, roomClaimedMilestones);
     if (unlockedClaim && willBeMarked) {
       sounds.playLineComplete();
       particleRef.current?.burst(window.innerWidth / 2, window.innerHeight * 0.4, 20);
@@ -1423,6 +1507,18 @@ export default function App() {
         `✨ ${unlockedClaim.pattern} er fylt på brettet ditt! Trykk fysisk på «${unlockedClaim.label}» for å melde inn bingo!`,
         'ready'
       );
+    } else if (!unlockedClaim && willBeMarked && bestCardLines >= 1) {
+      if (bestCardLines >= 3 && roomClaimedMilestones.includes('line3') && !roomClaimedMilestones.includes('fullbrett')) {
+        showCardActionNotice(
+          '🔒 3. rekker er allerede ropt i denne runden — fortsett til Full brett for å låse opp «Rop BINGO!»',
+          'warn'
+        );
+      } else if (bestCardLines >= 1 && bestCardLines < 3 && roomClaimedMilestones.includes('line1')) {
+        showCardActionNotice(
+          '🔒 1. rekke er allerede ropt i denne runden — fortsett til 3. rekker for å låse opp «Rop BINGO!»',
+          'warn'
+        );
+      }
     }
 
     if (remoteBingo.getIsRemotePlayer()) {
@@ -1437,20 +1533,44 @@ export default function App() {
     setPlayers(currentPlayers);
   };
 
-  // Physical BINGO ROP button handler — strictly gated to verified 1. rekke, 3. rekker, or Full brett
+  // Physical BINGO ROP button handler — strictly gated to verified & unlocked 1. rekke, 3. rekker, or Full brett
   const handlePhysicalBingoCall = (targetPlayerIndex?: number) => {
     const pIdx = targetPlayerIndex !== undefined ? targetPlayerIndex : activePlayerIndex;
     const player = players[pIdx] || players[0];
-    const eligible = getEligibleBingoClaimForPlayer(player, calledBalls);
+    const eligible = getEligibleBingoClaimForPlayer(player, calledBalls, roomClaimedMilestones);
 
     if (!player || !eligible) {
       sounds.playClick();
-      showCardActionNotice(
-        '🔒 Du kan ikke rope BINGO ennå! Bekreft først trukne tall/ord til du har 1. rekke, 3. rekker (loddrett, vannrett eller kryssende) eller fullt brett.',
-        'warn'
-      );
+      if (roomClaimedMilestones.includes('line3') && !roomClaimedMilestones.includes('fullbrett')) {
+        showCardActionNotice(
+          '🔒 1. og 3. rekke er allerede ropt! Bingorop-knappen er deaktivert til fullt brett er fullført.',
+          'warn'
+        );
+      } else if (roomClaimedMilestones.includes('line1') && !roomClaimedMilestones.includes('line3')) {
+        showCardActionNotice(
+          '🔒 1. rekke er allerede ropt av en deltaker! Bingorop-knappen er deaktivert til 3. rekker er fullført.',
+          'warn'
+        );
+      } else {
+        showCardActionNotice(
+          '🔒 Du kan ikke rope BINGO ennå! Bekreft først trukne tall/ord til du har 1. rekke, 3. rekker (loddrett, vannrett eller kryssende) eller fullt brett.',
+          'warn'
+        );
+      }
       return;
     }
+
+    // Lock this milestone across the entire session/room so no other participant can claim the same tier
+    const nextRoomMilestones = new Set<BingoMilestone>(roomClaimedMilestones);
+    nextRoomMilestones.add(eligible.milestone);
+    if (eligible.milestone === 'line3' || eligible.milestone === 'fullbrett') {
+      nextRoomMilestones.add('line1');
+    }
+    if (eligible.milestone === 'fullbrett') {
+      nextRoomMilestones.add('line3');
+    }
+    setRoomClaimedMilestones(Array.from(nextRoomMilestones));
+    setMilestoneWinners((prev) => ({ ...prev, [eligible.milestone]: player.name }));
 
     const updatedPlayers = players.map((p, idx) => {
       if (idx !== (targetPlayerIndex !== undefined ? targetPlayerIndex : players.indexOf(player))) {
@@ -1515,6 +1635,15 @@ export default function App() {
         task,
       });
 
+      const nextTargetText =
+        eligible.milestone === 'line3'
+          ? '➡️ Vi spiller videre til Full brett!'
+          : '➡️ Vi spiller videre til 3. rekker!';
+      const tierText = eligible.milestone === 'line3' ? '3. rekker' : '1. rekke';
+      setBingoProgressionBanner(
+        `🏆 ${player.name} har faktisk fylt ${tierText} og trykket BINGO! ${nextTargetText}`
+      );
+
       const inRoom = Boolean(
         remoteBingo.getCurrentRoomCode() ||
         remoteBingo.getHostCode() ||
@@ -1529,6 +1658,9 @@ export default function App() {
           player.name,
           eligible.confirmedNumbers
         );
+      } else {
+        remoteBingo.recordBingoActivityLocal(player.name, eligible.milestone, eligible.pattern);
+        setHostNotificationsList(remoteBingo.getHostNotifications());
       }
     }
   };
@@ -1597,6 +1729,9 @@ export default function App() {
     if (!remoteBingo.getIsRemotePlayer() && remoteBingo.canActAsHost()) {
       remoteBingo.unlockCodeForNewRound();
     }
+    setRoomClaimedMilestones([]);
+    setMilestoneWinners({});
+    setBingoProgressionBanner(null);
     setPlayers([]);
     setActivePlayerIndex(0);
     setScreen('TITLE');
@@ -1757,14 +1892,20 @@ export default function App() {
           setScreenDevice(preset);
         };
 
-        const eligibleBingoClaim = getEligibleBingoClaimForPlayer(activePlayer, calledBalls);
+        const eligibleBingoClaim = getEligibleBingoClaimForPlayer(
+          activePlayer,
+          calledBalls,
+          roomClaimedMilestones
+        );
         const activeCardForEval = activePlayer
           ? activePlayer.cards[activePlayer.activeCardIndex || 0] || activePlayer.cards[0]
           : undefined;
         const activeCardWinEval = activeCardForEval
           ? evaluateBoardWins(activeCardForEval, calledBalls)
           : null;
-        const claimedMilestones = activePlayer?.claimedMilestones || [];
+        const claimedMilestones = Array.from(
+          new Set<BingoMilestone>([...(activePlayer?.claimedMilestones || []), ...roomClaimedMilestones])
+        );
         const completedLinesCount = activeCardWinEval?.completedLines || 0;
 
         return (
@@ -2041,7 +2182,7 @@ export default function App() {
                         ? 'bg-purple-500 text-white border-purple-300 font-black'
                         : 'bg-purple-600/30 border-purple-400/50 hover:border-purple-300 text-purple-100'
                     }`}
-                    title="Åpne Quiz eller Memory (VoksenQuiz, FamilieQuiz, JuleQuiz, Memory)"
+                    title="Åpne Quiz eller Memory (VoksenQuiz, FamilieQuiz, JuleQuiz, Senior Grenland Quiz, Memory)"
                   >
                     <span>🎭</span>
                     <span>Quiz &amp; Memory</span>
@@ -2093,6 +2234,21 @@ export default function App() {
                         <div>
                           <div>JuleQuiz</div>
                           <div className="text-[10px] text-emerald-300/70 font-normal">Juletre, mat &amp; tradisjoner</div>
+                        </div>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          sounds.playClick();
+                          setIsPlayQuizMenuOpen(false);
+                          handleOpenQuiz('senior');
+                        }}
+                        className="w-full px-3 py-2 rounded-xl text-left text-xs text-amber-100 hover:bg-amber-500/25 font-bold flex items-center gap-2.5 cursor-pointer"
+                      >
+                        <span className="text-base">👵</span>
+                        <div>
+                          <div>Senior Grenland Quiz</div>
+                          <div className="text-[10px] text-amber-300/70 font-normal">Ungdomsminner &amp; lokalhistorie</div>
                         </div>
                       </button>
                       <button
@@ -2391,9 +2547,13 @@ export default function App() {
                         >
                           <span>{m.done ? '✓' : m.ready ? '🔔' : '•'}</span>
                           <span>{m.label}</span>
-                          {!m.done && (
+                          {m.done && milestoneWinners[m.id] ? (
+                            <span className="text-[10px] font-black text-emerald-100/90 truncate max-w-[75px]">
+                              ({milestoneWinners[m.id]})
+                            </span>
+                          ) : !m.done ? (
                             <span className="font-mono text-[10px] opacity-80 tabular-nums">({m.progress})</span>
-                          )}
+                          ) : null}
                         </div>
                       ))}
                     </div>
@@ -2401,7 +2561,11 @@ export default function App() {
 
                   <div className="flex items-center justify-between gap-2 pt-1.5 border-t border-amber-500/20">
                     <span className="text-[10px] text-amber-200/70 leading-tight">
-                      Vannrett, loddrett eller kryssende · Bekreft trukne tall fysisk
+                      {roomClaimedMilestones.includes('line3') && !roomClaimedMilestones.includes('fullbrett')
+                        ? '1. og 3. rekke er ropt · Fullfør fullt brett for neste bingo'
+                        : roomClaimedMilestones.includes('line1') && !roomClaimedMilestones.includes('line3')
+                        ? '1. rekke er allerede ropt · Fullfør 3. rekker for neste bingo'
+                        : 'Vannrett, loddrett eller kryssende · Bekreft trukne tall fysisk'}
                     </span>
                     <button
                       type="button"
@@ -2415,6 +2579,10 @@ export default function App() {
                       title={
                         eligibleBingoClaim
                           ? `Trykk fysisk for å rope ${eligibleBingoClaim.pattern}!`
+                          : roomClaimedMilestones.includes('line3')
+                          ? 'Låst — 3. rekker er allerede ropt. Fullfør fullt brett!'
+                          : roomClaimedMilestones.includes('line1')
+                          ? 'Låst — 1. rekke er allerede ropt. Fullfør 3. rekker!'
                           : 'Låst til 1. rekke, 3. rekker eller Full brett er bekreftet med trukne tall/ord'
                       }
                     >
@@ -2422,6 +2590,10 @@ export default function App() {
                       <span>
                         {eligibleBingoClaim
                           ? eligibleBingoClaim.label
+                          : roomClaimedMilestones.includes('line3')
+                          ? 'Låst (Fyll fullt brett)'
+                          : roomClaimedMilestones.includes('line1')
+                          ? 'Låst (Fyll 3. rekker)'
                           : 'Rop BINGO! (Fyll rekke)'}
                       </span>
                     </button>
@@ -2429,26 +2601,46 @@ export default function App() {
                 </div>
               ) : null;
 
-              const actionNoticeBox = cardActionNotice ? (
-                <div
-                  role="status"
-                  className={`w-full px-3 py-2 rounded-xl border-2 shadow-lg flex items-center justify-between gap-2 text-xs font-bold transition-all ${
-                    cardActionNotice.tone === 'ready'
-                      ? 'bg-emerald-950/95 border-emerald-400 text-emerald-100'
-                      : 'bg-rose-950/95 border-amber-400/80 text-amber-100'
-                  }`}
-                >
-                  <span>{cardActionNotice.text}</span>
-                  <button
-                    type="button"
-                    onClick={() => setCardActionNotice(null)}
-                    className="text-xs font-black px-1.5 py-0.5 rounded hover:bg-white/10 cursor-pointer shrink-0"
-                    aria-label="Lukk melding"
-                  >
-                    ✕
-                  </button>
-                </div>
-              ) : null;
+              const actionNoticeBox = (
+                <>
+                  {bingoProgressionBanner && (
+                    <div
+                      role="status"
+                      className="w-full px-3.5 py-2.5 rounded-xl border-2 border-amber-300 bg-gradient-to-r from-amber-500/25 via-emerald-500/20 to-cyan-500/20 text-amber-50 shadow-lg flex items-center justify-between gap-2 text-xs sm:text-sm font-black"
+                    >
+                      <span>{bingoProgressionBanner}</span>
+                      <button
+                        type="button"
+                        onClick={() => setBingoProgressionBanner(null)}
+                        className="text-xs font-black px-2 py-0.5 rounded bg-black/30 hover:bg-black/50 cursor-pointer shrink-0"
+                        aria-label="Lukk bingovarsel"
+                      >
+                        OK
+                      </button>
+                    </div>
+                  )}
+                  {cardActionNotice && (
+                    <div
+                      role="status"
+                      className={`w-full px-3 py-2 rounded-xl border-2 shadow-lg flex items-center justify-between gap-2 text-xs font-bold transition-all ${
+                        cardActionNotice.tone === 'ready'
+                          ? 'bg-emerald-950/95 border-emerald-400 text-emerald-100'
+                          : 'bg-rose-950/95 border-amber-400/80 text-amber-100'
+                      }`}
+                    >
+                      <span>{cardActionNotice.text}</span>
+                      <button
+                        type="button"
+                        onClick={() => setCardActionNotice(null)}
+                        className="text-xs font-black px-1.5 py-0.5 rounded hover:bg-white/10 cursor-pointer shrink-0"
+                        aria-label="Lukk melding"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  )}
+                </>
+              );
 
               const standingsSection = !isRemoteParticipant ? (
                 <section className="w-full p-3.5 sm:p-4 rounded-2xl bg-gradient-to-br from-[#1d120a] via-[#130d08] to-black/80 border border-amber-500/35 shadow-xl space-y-3">
@@ -2472,17 +2664,19 @@ export default function App() {
                     </div>
 
                     <div className="flex flex-wrap items-center gap-1.5">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          sounds.playClick();
-                          handleStartNewBingoRound();
-                        }}
-                        className="px-2.5 py-1.5 rounded-xl bg-amber-500/25 hover:bg-amber-500/40 border border-amber-400/50 text-amber-100 font-black text-[11px] cursor-pointer shadow"
-                        title="Start ny runde for hele rommet (beholder romkoden og alle deltakere)"
-                      >
-                        🔄 Ny runde nå
-                      </button>
+                      {canHostDrawBalls && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            sounds.playClick();
+                            handleStartNewBingoRound();
+                          }}
+                          className="px-2.5 py-1.5 rounded-xl bg-amber-500/25 hover:bg-amber-500/40 border border-amber-400/50 text-amber-100 font-black text-[11px] cursor-pointer shadow"
+                          title="Start ny runde for hele rommet (kun arrangør styrer)"
+                        >
+                          🔄 Ny runde nå
+                        </button>
+                      )}
                       {remoteBingo.getHostCode() && (
                         <>
                           <button
@@ -2625,6 +2819,38 @@ export default function App() {
                         </div>
                       )}
                     </div>
+                  </div>
+
+                  {/* Live Organizer Feed: Who joined & Verified Bingo Claims */}
+                  <div className="p-3 rounded-xl bg-emerald-950/25 border border-emerald-400/35 space-y-2">
+                    <div className="flex items-center justify-between gap-2 text-[11px] font-black uppercase tracking-wider text-emerald-300">
+                      <span>🔔 Varsler til arrangør — Hvem som ble med &amp; Bingorop ({hostNotificationsList.length})</span>
+                    </div>
+                    {hostNotificationsList.length === 0 ? (
+                      <div className="text-xs text-slate-400">
+                        Ingen hendelser ennå. Du får automatisk varsel her så snart noen blir med med koden eller trykker BINGO.
+                      </div>
+                    ) : (
+                      <div className="space-y-1 max-h-32 overflow-y-auto pr-1">
+                        {hostNotificationsList.slice(0, 8).map((hn) => (
+                          <div
+                            key={hn.id}
+                            className={`px-2.5 py-1.5 rounded-lg border text-xs flex items-center justify-between gap-2 ${
+                              hn.type === 'bingo'
+                                ? 'bg-amber-500/20 border-amber-400/50 text-amber-100 font-bold'
+                                : 'bg-emerald-500/15 border-emerald-400/35 text-emerald-100'
+                            }`}
+                          >
+                            <span className="truncate">
+                              {hn.type === 'bingo' ? '🏆' : '👋'} {hn.detail}
+                            </span>
+                            <span className="text-[10px] text-amber-200/70 shrink-0">
+                              {hn.gameLabel} · {new Date(hn.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </section>
               ) : null;
@@ -2858,10 +3084,22 @@ export default function App() {
                         title={
                           eligibleBingoClaim
                             ? `Trykk for å rope ${eligibleBingoClaim.pattern}!`
+                            : roomClaimedMilestones.includes('line3')
+                            ? 'Låst til fullt brett er fullført'
+                            : roomClaimedMilestones.includes('line1')
+                            ? 'Låst til 3. rekker er fullført'
                             : 'Låst til 1. rekke, 3. rekker eller Full brett er fylt og bekreftet'
                         }
                       >
-                        <span className="truncate">{eligibleBingoClaim ? eligibleBingoClaim.label : '🔒 BINGO'}</span>
+                        <span className="truncate">
+                          {eligibleBingoClaim
+                            ? eligibleBingoClaim.label
+                            : roomClaimedMilestones.includes('line3')
+                            ? '🔒 Fullt brett'
+                            : roomClaimedMilestones.includes('line1')
+                            ? '🔒 3. rekker'
+                            : '🔒 BINGO'}
+                        </span>
                       </button>
 
                       <button
@@ -2897,7 +3135,7 @@ export default function App() {
               if ((mode === 'ALL_IN_ONE' && unifiedView === 'stage') || mode === 'CALLER_CAGE') {
                 return (
                   <div className="w-full flex flex-col items-center gap-5">
-                    <div className={`w-full ${screenDevice === 'big_screen' ? 'max-w-2xl' : 'max-w-xl'}`}>
+                    <div className={`w-full ${screenDevice === 'big_screen' ? 'max-w-5xl' : 'max-w-3xl'}`}>
                       <BallCageCanvas
                         onBallDrawn={handleBallDrawn}
                         calledBalls={calledBalls}
@@ -2913,6 +3151,9 @@ export default function App() {
                         isPaused={false}
                         canDraw={canHostDrawBalls}
                         readOnlyMessage="🔒 Kun arrangør styrer kuletrekningen"
+                        compactSidebar={false}
+                        tumblerSize={screenDevice === 'big_screen' ? 'tv' : 'large'}
+                        layout="row"
                       />
                     </div>
                     {standingsSection}
@@ -2924,7 +3165,13 @@ export default function App() {
               return (
                 <div className="w-full flex flex-col md:flex-row items-start gap-4 lg:gap-6">
                   {/* Left Floating Rail: Stays pinned on the left side of the Bingo Card while scrolling up/down */}
-                  <aside className="w-full md:w-[350px] lg:w-[410px] xl:w-[440px] shrink-0 md:sticky md:top-3 self-start md:max-h-[calc(100vh-1.5rem)] md:overflow-y-auto no-scrollbar space-y-2.5 z-20">
+                  <aside
+                    className={`w-full shrink-0 md:sticky md:top-3 self-start md:max-h-[calc(100vh-1.5rem)] md:overflow-y-auto no-scrollbar space-y-2.5 z-20 ${
+                      screenDevice === 'big_screen'
+                        ? 'md:w-[430px] lg:w-[500px] xl:w-[580px]'
+                        : 'md:w-[390px] lg:w-[440px] xl:w-[480px]'
+                    }`}
+                  >
                     <BallCageCanvas
                       onBallDrawn={handleBallDrawn}
                       calledBalls={calledBalls}
@@ -2940,7 +3187,9 @@ export default function App() {
                       isPaused={false}
                       canDraw={canHostDrawBalls}
                       readOnlyMessage="🔒 Kun arrangør styrer kuletrekningen"
-                      compactSidebar={true}
+                      compactSidebar={false}
+                      tumblerSize={screenDevice === 'big_screen' ? 'tv' : 'large'}
+                      layout="stacked"
                     />
 
                     {/* Milepæler & Rop BINGO! directly attached below Trommelen in left rail (never overlaps Bingo Card!) */}
@@ -3128,11 +3377,16 @@ export default function App() {
         }}
       />
 
-      {/* Printable Cards Modal (supports numerous & numerical) */}
+      {/* Printable Cards Modal (supports 50-100 hall sheets + Music Bingo) */}
       <PrintableCardsModal
         isOpen={isPrintOpen}
-        onClose={() => setIsPrintOpen(false)}
+        onClose={() => {
+          setIsPrintOpen(false);
+          setPrintModalConfig({});
+        }}
         defaultTheme={theme}
+        initialMode={printModalConfig.mode}
+        initialCount={printModalConfig.count}
       />
 
       {/* Mixer & Cage Control Station */}
@@ -3176,6 +3430,11 @@ export default function App() {
         onRefillDrum={canHostDrawBalls ? handleRefillDrumKeepCards : undefined}
         onOpenRemoteBingo={() => setIsRemoteBingoOpen(true)}
         onOpenTvMode={(game, code) => setTvModeConfig({ active: true, game, code })}
+        onOpenQuiz={(ed = 'senior', tab = 'host') => handleOpenQuiz(ed, tab)}
+        onOpenPrintCards={(printMode = 'music_bingo', count = 50) => {
+          setPrintModalConfig({ mode: printMode, count });
+          setIsPrintOpen(true);
+        }}
         onStartNewRound={handleStartNewBingoRound}
       />
 
@@ -3381,6 +3640,13 @@ export default function App() {
           setIsRemoteBingoOpen(false);
           setPendingGameStart(null);
           handleOpenQuiz('christmas', 'host');
+        }}
+        onSelectSeniorQuiz={() => {
+          setIsGameSelectorOpen(false);
+          setIsAudienceOpen(false);
+          setIsRemoteBingoOpen(false);
+          setPendingGameStart(null);
+          handleOpenQuiz('senior', 'host');
         }}
         onSelectMemory={() => {
           setIsGameSelectorOpen(false);

@@ -25,6 +25,8 @@ interface BallCageCanvasProps {
   canDraw?: boolean;
   readOnlyMessage?: string;
   compactSidebar?: boolean;
+  tumblerSize?: 'compact' | 'large' | 'tv';
+  layout?: 'auto' | 'stacked' | 'row';
 }
 
 interface PhysicsBall {
@@ -54,7 +56,17 @@ export const BallCageCanvas: React.FC<BallCageCanvasProps> = ({
   canDraw = true,
   readOnlyMessage = '🔒 Kun arrangør styrer kuletrekningen',
   compactSidebar = false,
+  tumblerSize,
+  layout = 'auto',
 }) => {
+  const effectiveSize: 'compact' | 'large' | 'tv' =
+    tumblerSize || (compactSidebar ? 'compact' : 'large');
+  const effectiveLayout: 'stacked' | 'row' =
+    layout !== 'auto'
+      ? layout
+      : effectiveSize === 'compact'
+      ? 'row'
+      : 'stacked';
   const { t } = useTranslation();
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [isSpinning, setIsSpinning] = useState(false);
@@ -181,11 +193,12 @@ export const BallCageCanvas: React.FC<BallCageCanvasProps> = ({
 
     // After quick spin and chute animation, finalize ball drop and trigger callback
     setTimeout(() => {
-      sounds.playBallDrop();
-      sounds.speakBall(chosen.letter, chosen.number, chosen.affirmation);
       setCurrentBall(chosen);
       if (onBallDrawnRef.current) {
         onBallDrawnRef.current(chosen);
+      } else {
+        sounds.playBallDrop();
+        sounds.speakBall(chosen.letter, chosen.number, chosen.affirmation);
       }
       setIsSpinning(false);
       state.isDrawing = false;
@@ -287,10 +300,13 @@ export const BallCageCanvas: React.FC<BallCageCanvasProps> = ({
 
       const w = canvas.width;
       const h = canvas.height;
-      ctx.clearRect(0, 0, w, h);
+      const logicalW = 340;
+      const logicalH = 260;
+      ctx.setTransform(w / logicalW, 0, 0, h / logicalH, 0, 0);
+      ctx.clearRect(0, 0, logicalW, logicalH);
 
-      const centerX = w * 0.44;
-      const centerY = h * 0.48;
+      const centerX = logicalW * 0.44;
+      const centerY = logicalH * 0.48;
       const cageRadius = 90;
 
       // Update cage angle
@@ -634,29 +650,45 @@ export const BallCageCanvas: React.FC<BallCageCanvasProps> = ({
     };
   }, [canDraw, isAutoCalling, uncalledBalls.length]);
 
+  const isCompact = effectiveSize === 'compact';
+  const isTv = effectiveSize === 'tv';
+  const isStacked = effectiveLayout === 'stacked';
+
   return (
     <div
       className={`relative flex flex-col items-center bg-amber-950/45 border border-amber-500/25 rounded-2xl backdrop-blur-md shadow-2xl w-full overflow-hidden ${
-        compactSidebar ? 'p-3' : 'p-4'
+        isCompact ? 'p-3' : isTv ? 'p-4 sm:p-5' : 'p-4'
       }`}
     >
       {/* Cage Canvas & Drawn Ball display */}
       <div
-        className={`flex w-full items-center justify-between ${
-          compactSidebar
-            ? 'flex-col sm:flex-row gap-2.5'
-            : 'flex-col md:flex-row gap-4'
+        className={`flex w-full items-center ${
+          isCompact
+            ? 'flex-col sm:flex-row justify-between gap-2.5'
+            : isStacked
+            ? 'flex-col justify-center gap-3.5'
+            : 'flex-col lg:flex-row justify-center gap-6'
         }`}
       >
         {/* Interactive 60fps Cage Canvas with Drag to Spin Handle */}
-        <div className="relative group shrink-0">
+        <div
+          className={`relative group shrink-0 ${
+            isCompact
+              ? 'w-[240px] sm:w-[250px]'
+              : isTv && isStacked
+              ? 'w-full max-w-[580px]'
+              : isTv
+              ? 'w-full max-w-[640px] lg:flex-1'
+              : isStacked
+              ? 'w-full max-w-[460px]'
+              : 'w-full max-w-[560px]'
+          }`}
+        >
           <canvas
             ref={canvasRef}
-            width={340}
-            height={260}
-            className={`${canDraw ? 'cursor-grab active:cursor-grabbing' : 'cursor-default'} touch-none select-none rounded-xl block ${
-              compactSidebar ? 'w-[205px] h-[157px]' : 'max-w-full h-auto'
-            }`}
+            width={680}
+            height={520}
+            className={`${canDraw ? 'cursor-grab active:cursor-grabbing' : 'cursor-default'} touch-none select-none rounded-2xl block w-full aspect-[340/260] h-auto`}
             onMouseDown={handlePointerDown}
             onMouseMove={handlePointerMove}
             onMouseUp={handlePointerUp}
@@ -666,19 +698,19 @@ export const BallCageCanvas: React.FC<BallCageCanvasProps> = ({
             onTouchEnd={handlePointerUp}
             title={
               canDraw
-                ? "Trykk eller dra for å rulle trommelen"
-                : "Kun arrangøren trekker kulene fra trommelen"
+                ? 'Trykk eller dra for å rulle trommelen'
+                : 'Kun arrangøren trekker kulene fra trommelen'
             }
           />
           <div
-            className={`absolute top-1.5 left-2 rounded-full bg-black/80 border border-amber-400/60 text-amber-200 font-bold pointer-events-none shadow flex items-center gap-1 ${
-              compactSidebar ? 'px-2 py-0.5 text-[10px]' : 'px-2.5 py-1 text-[11px]'
+            className={`absolute top-2 left-2 rounded-full bg-black/80 border border-amber-400/60 text-amber-200 font-bold pointer-events-none shadow flex items-center gap-1 ${
+              isCompact ? 'px-2 py-0.5 text-[10px]' : isTv ? 'px-3 py-1 text-xs' : 'px-2.5 py-1 text-[11px]'
             }`}
           >
             {canDraw ? (
               <>
                 <span>🎲</span>
-                <span>{compactSidebar ? 'Trykk/dra for å rulle' : 'Trykk eller dra for å rulle trommelen'}</span>
+                <span>{isCompact ? 'Trykk/dra for å rulle' : 'Trykk eller dra for å rulle trommelen'}</span>
               </>
             ) : (
               <>
@@ -688,8 +720,8 @@ export const BallCageCanvas: React.FC<BallCageCanvasProps> = ({
             )}
           </div>
           <div
-            className={`absolute bottom-1.5 left-2 text-amber-200/85 font-mono font-bold pointer-events-none bg-black/65 px-2 py-0.5 rounded-md border border-amber-500/20 ${
-              compactSidebar ? 'text-[10px]' : 'text-xs'
+            className={`absolute bottom-2 left-2 text-amber-200/90 font-mono font-bold pointer-events-none bg-black/70 px-2.5 py-0.5 rounded-md border border-amber-500/25 ${
+              isCompact ? 'text-[10px]' : isTv ? 'text-xs sm:text-sm' : 'text-xs'
             }`}
           >
             {uncalledBalls.length > 0 ? `${uncalledBalls.length} kuler igjen` : 'Alle 75 kuler trukket'}
@@ -699,24 +731,32 @@ export const BallCageCanvas: React.FC<BallCageCanvasProps> = ({
         {/* Big Spotlight on Current Drawn Ball */}
         <div
           className={`flex flex-col items-center justify-center min-w-0 w-full ${
-            compactSidebar ? 'p-1.5 flex-1' : 'p-3 md:min-w-[210px] max-w-xs'
+            isCompact
+              ? 'p-1.5 flex-1'
+              : isStacked
+              ? 'px-2 py-1'
+              : 'p-3 lg:min-w-[240px] max-w-xs'
           }`}
         >
           <div
             className={`uppercase font-mono font-bold tracking-wider text-amber-300/80 mb-1 flex items-center gap-1 text-center ${
-              compactSidebar ? 'text-[9px]' : 'text-[10px] mb-1.5 gap-1.5'
+              isCompact ? 'text-[9px]' : isTv ? 'text-xs mb-2 gap-1.5' : 'text-[10px] mb-1.5 gap-1.5'
             }`}
           >
             <span>🎲</span>
-            <span>{compactSidebar ? 'Siste tall & ord' : 'Siste tall & ord fra blenderen'}</span>
+            <span>{isCompact ? 'Siste tall & ord' : 'Siste tall & ord fra blenderen'}</span>
           </div>
 
           {currentBall ? (
-            <div className="flex flex-col items-center animate-glow w-full">
+            <div
+              className={`flex items-center justify-center animate-glow w-full ${
+                isStacked ? 'flex-row flex-wrap gap-4' : 'flex-col'
+              }`}
+            >
               {/* Ball Sphere with Radiant Gradient */}
               <div
-                className={`rounded-full flex flex-col items-center justify-center shadow-2xl border-4 border-white/80 transition-transform duration-300 transform hover:scale-105 ${
-                  compactSidebar ? 'w-16 h-16' : 'w-24 h-24'
+                className={`rounded-full flex flex-col items-center justify-center shadow-2xl border-4 border-white/80 transition-transform duration-300 transform hover:scale-105 shrink-0 ${
+                  isCompact ? 'w-16 h-16' : isTv ? 'w-24 h-24 sm:w-28 sm:h-28' : 'w-24 h-24'
                 }`}
                 style={{
                   background: `radial-gradient(circle at 35% 35%, #ffffff 0%, ${currentBall.color} 55%, #0f172a 100%)`,
@@ -725,14 +765,14 @@ export const BallCageCanvas: React.FC<BallCageCanvasProps> = ({
               >
                 <span
                   className={`font-black tracking-widest text-white/90 drop-shadow ${
-                    compactSidebar ? 'text-[10px]' : 'text-sm'
+                    isCompact ? 'text-[10px]' : isTv ? 'text-sm sm:text-base' : 'text-sm'
                   }`}
                 >
                   {currentBall.letter}
                 </span>
                 <span
                   className={`font-extrabold text-white tabular-nums drop-shadow-md leading-none ${
-                    compactSidebar ? 'text-xl' : 'text-3xl'
+                    isCompact ? 'text-xl' : isTv ? 'text-3xl sm:text-4xl' : 'text-3xl'
                   }`}
                 >
                   {currentBall.number}
@@ -740,15 +780,15 @@ export const BallCageCanvas: React.FC<BallCageCanvasProps> = ({
               </div>
 
               {/* Joyful Affirmation Callout */}
-              <div className="mt-1.5 text-center w-full px-1">
+              <div className={`${isStacked ? 'text-left max-w-[230px]' : 'mt-1.5 text-center w-full px-1'}`}>
                 <span
                   className={`text-amber-300 font-heading font-black tracking-tight block leading-snug ${
-                    compactSidebar ? 'text-sm' : 'text-base sm:text-lg'
+                    isCompact ? 'text-sm' : isTv ? 'text-lg sm:text-xl' : 'text-base sm:text-lg'
                   }`}
                 >
                   &ldquo;{currentBall.affirmation}&rdquo;
                 </span>
-                <span className="text-[10px] text-amber-100/75 font-mono mt-0.5 block">
+                <span className={`text-amber-100/75 font-mono mt-0.5 block ${isTv ? 'text-xs' : 'text-[10px]'}`}>
                   Kule #{calledBalls.length}/75 ({currentBall.letter}-{currentBall.number})
                 </span>
               </div>
@@ -776,15 +816,15 @@ export const BallCageCanvas: React.FC<BallCageCanvasProps> = ({
           ) : (
             <div
               className={`flex flex-col items-center justify-center text-center border border-dashed border-amber-500/30 rounded-xl bg-amber-950/20 w-full ${
-                compactSidebar ? 'p-3' : 'p-5'
+                isCompact ? 'p-3' : isTv ? 'p-5' : 'p-4'
               }`}
             >
               <div
                 className={`rounded-full border-2 border-amber-400/40 flex items-center justify-center text-amber-300/60 mb-1.5 ${
-                  compactSidebar ? 'w-10 h-10' : 'w-14 h-14 mb-2'
+                  isCompact ? 'w-10 h-10' : 'w-14 h-14 mb-2'
                 }`}
               >
-                <span className={compactSidebar ? 'text-base font-bold' : 'text-xl font-bold'}>?</span>
+                <span className={isCompact ? 'text-base font-bold' : 'text-xl font-bold'}>?</span>
               </div>
               <p className="text-xs text-amber-200/90 font-bold">
                 {canDraw ? 'Blenderen er klar' : 'Venter på arrangør'}

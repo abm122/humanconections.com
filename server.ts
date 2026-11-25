@@ -141,6 +141,8 @@ interface QuizActiveQuestionPayload {
   id: string;
   category: string;
   questionType: 'multiple_choice' | 'open_text';
+  musicSongId?: string;
+  musicHint?: string;
   question: string;
   options: [string, string, string, string];
   correctIndex: number;
@@ -173,7 +175,7 @@ interface QuizRoomState {
   hostKey?: string;
   hostName: string;
   isHostActive: boolean;
-  edition: 'adult' | 'family' | 'christmas';
+  edition: 'adult' | 'family' | 'christmas' | 'senior';
   phase: 'lobby' | 'question' | 'reveal' | 'finished';
   questionIndex: number;
   totalQuestions: number;
@@ -225,6 +227,18 @@ interface BingoTvPlayerSummary {
   isRemote?: boolean;
 }
 
+type ServerBingoMilestone = 'line1' | 'line3' | 'fullbrett';
+
+function resolveBingoMilestoneFromPattern(pattern: string, isFullHouse: boolean): ServerBingoMilestone {
+  if (isFullHouse || /fullbrett|fullt?\s*brett|full_?house|blackout/i.test(pattern)) {
+    return 'fullbrett';
+  }
+  if (/3\s*\.?\s*rekke|3\s*line|tre\s*rekke/i.test(pattern)) {
+    return 'line3';
+  }
+  return 'line1';
+}
+
 interface BingoHostRoomEntry {
   roomId: string;
   roomCode: string;
@@ -237,15 +251,80 @@ interface BingoHostRoomEntry {
   showCodeOnScreen: boolean;
   playersSummary: BingoTvPlayerSummary[];
   themeTitle?: string;
-  lastClaim?: { playerName: string; pattern: string; isFullHouse?: boolean; timestamp: number } | null;
+  lastClaim?: { playerName: string; pattern: string; isFullHouse?: boolean; milestone?: ServerBingoMilestone; timestamp: number } | null;
+  claimedMilestones?: ServerBingoMilestone[];
+  milestoneWinners?: Partial<Record<ServerBingoMilestone, string>>;
+}
+
+interface MusicBingoParticipantProgress {
+  id: string;
+  name: string;
+  markedCount: number;
+  linesCompleted: number;
+  hasBingo: boolean;
+}
+
+interface MusicBingoRoomState {
+  roomCode: string;
+  hostId: string;
+  hostKey?: string;
+  hostName: string;
+  roundNumber: number;
+  isActive: boolean;
+  playedSongIds: string[];
+  currentSongId: string | null;
+  revealCurrentSong: boolean;
+  clipStartedAt: number;
+  clipDurationSec: number;
+  lastClaim: { playerName: string; pattern: string; timestamp: number } | null;
+  claimedMilestones?: ServerBingoMilestone[];
+  milestoneWinners?: Partial<Record<ServerBingoMilestone, string>>;
+  participants: Map<string, MusicBingoParticipantProgress>;
 }
 
 const quizRooms = new Map<string, QuizRoomState>();
 const bingoHostRooms = new Map<string, BingoHostRoomEntry>();
+const musicBingoRooms = new Map<string, MusicBingoRoomState>();
 const pendingBingoRoundTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const bingoRemoteProgressByRoom = new Map<string, Map<string, BingoTvPlayerSummary>>();
 const activeTvGameByCode = new Map<string, 'quiz' | 'bingo'>();
 const lastFirestoreSyncByCode = new Map<string, number>();
+
+function serializeMusicRoom(room: MusicBingoRoomState) {
+  return {
+    roomCode: room.roomCode,
+    hostName: room.hostName,
+    roundNumber: room.roundNumber,
+    isActive: room.isActive,
+    playedSongIds: room.playedSongIds,
+    currentSongId: room.currentSongId,
+    revealCurrentSong: room.revealCurrentSong,
+    clipStartedAt: room.clipStartedAt,
+    clipDurationSec: room.clipDurationSec,
+    lastClaim: room.lastClaim,
+    claimedMilestones: room.claimedMilestones || [],
+    milestoneWinners: room.milestoneWinners || {},
+    participants: Array.from(room.participants.values()).slice(0, 120),
+    serverNow: Date.now(),
+  };
+}
+
+function broadcastMusicBingoState(code: string, room: MusicBingoRoomState) {
+  const bingoRoomId = `joy-bingo-${code}`;
+  const quizRoomId = `joy-quiz-${code}`;
+  const msg = JSON.stringify({
+    type: 'music:state',
+    payload: serializeMusicRoom(room),
+  });
+  for (const [ws, client] of clients.entries()) {
+    if (
+      ws.readyState === WebSocket.OPEN &&
+      (isClientInRoom(client, bingoRoomId) || isClientInRoom(client, quizRoomId) || client.tvWatchCode === code)
+    ) {
+      ws.send(msg);
+    }
+  }
+}
 
 const ROOM_DATA_DIR = path.join(__dirname, '.data');
 const ACTIVE_ROOMS_PATH = path.join(ROOM_DATA_DIR, 'active-rooms.json');
@@ -494,6 +573,8 @@ function serializeQuizRoomPublic(room: QuizRoomState, isTvViewer = false) {
         id: room.currentQuestion.id,
         category: room.currentQuestion.category,
         questionType: room.currentQuestion.questionType,
+        musicSongId: room.currentQuestion.musicSongId,
+        musicHint: room.currentQuestion.musicHint,
         question: room.currentQuestion.question,
         options: room.currentQuestion.options,
         samplePlaceholder: room.currentQuestion.samplePlaceholder,
@@ -606,6 +687,8 @@ function serializeBingoTvState(entry: BingoHostRoomEntry, isTvViewer = false) {
     totalPlayersCount: mergedPlayers.length,
     themeTitle: entry.themeTitle || 'Storskjerm & Sosial Bingo',
     lastClaim: entry.lastClaim || null,
+    claimedMilestones: entry.claimedMilestones || [],
+    milestoneWinners: entry.milestoneWinners || {},
     serverNow: Date.now(),
   };
 }
@@ -640,6 +723,8 @@ function executeBingoNewRound(
   entry.roundNumber = (entry.roundNumber || 1) + 1;
   entry.calledBalls = [];
   entry.lastClaim = null;
+  entry.claimedMilestones = [];
+  entry.milestoneWinners = {};
   entry.playersSummary = (entry.playersSummary || []).map((p) => ({
     ...p,
     linesCompleted: 0,
@@ -658,6 +743,8 @@ function executeBingoNewRound(
       roundNumber: entry.roundNumber,
       winnerName: winnerName || '',
       reason,
+      claimedMilestones: [],
+      milestoneWinners: {},
       timestamp: Date.now(),
     },
   });
@@ -1285,12 +1372,46 @@ wss.on('connection', (ws) => {
           // A remote or Storskjerm participant physically claimed BINGO (1. rekke, 3. rekker, or Fullbrett)!
           const cleanName = sanitizeMessage(payload.playerName || currentClient.name).cleanText || 'Spiller';
           const cleanPattern = sanitizeMessage(payload.pattern || 'FULLBRETT').cleanText || 'FULLBRETT';
-          const isFullHouse = Boolean(payload?.isFullHouse) || /fullbrett|full_?house|blackout/i.test(cleanPattern);
-          const displayPattern = isFullHouse ? 'FULLBRETT BINGO' : cleanPattern;
+          const isFullHouse = Boolean(payload?.isFullHouse) || /fullbrett|fullt?\s*brett|full_?house|blackout/i.test(cleanPattern);
+          const milestoneTier = resolveBingoMilestoneFromPattern(cleanPattern, isFullHouse);
+          const displayPattern = isFullHouse
+            ? 'FULLBRETT BINGO'
+            : milestoneTier === 'line3'
+            ? '3. REKKER'
+            : cleanPattern;
 
           const entry = bingoHostRooms.get(targetBingoRoom);
           if (entry) {
-            const minRequiredBalls = isFullHouse ? 24 : /3/.test(cleanPattern) ? 12 : 4;
+            const existingClaimed = Array.isArray(entry.claimedMilestones) ? entry.claimedMilestones : [];
+            if (existingClaimed.includes(milestoneTier)) {
+              const prevWinner = entry.milestoneWinners?.[milestoneTier];
+              const tierLabel =
+                milestoneTier === 'fullbrett'
+                  ? 'Full brett'
+                  : milestoneTier === 'line3'
+                  ? '3. rekker'
+                  : '1. rekke';
+              const nextHint =
+                milestoneTier === 'line1'
+                  ? 'Bingorop er låst til 3. rekker eller fullt brett er fullført.'
+                  : milestoneTier === 'line3'
+                  ? 'Bingorop er låst til fullt brett er fullført.'
+                  : 'Runden avsluttes straks.';
+              ws.send(JSON.stringify({
+                type: 'bingo:claim_rejected',
+                payload: {
+                  milestone: milestoneTier,
+                  claimedMilestones: existingClaimed,
+                  milestoneWinners: entry.milestoneWinners || {},
+                  message: prevWinner
+                    ? `🔒 ${tierLabel} er allerede ropt av ${prevWinner}! ${nextHint}`
+                    : `🔒 ${tierLabel} er allerede ropt i dette rommet! ${nextHint}`,
+                },
+              }));
+              break;
+            }
+
+            const minRequiredBalls = isFullHouse ? 24 : milestoneTier === 'line3' ? 12 : 4;
             if (entry.calledBalls.length < minRequiredBalls) {
               ws.send(JSON.stringify({
                 type: 'bingo:claim_rejected',
@@ -1310,12 +1431,28 @@ wss.on('connection', (ws) => {
                 break;
               }
             }
+
+            const nextClaimedSet = new Set<ServerBingoMilestone>(existingClaimed);
+            nextClaimedSet.add(milestoneTier);
+            if (milestoneTier === 'line3' || milestoneTier === 'fullbrett') {
+              nextClaimedSet.add('line1');
+            }
+            if (milestoneTier === 'fullbrett') {
+              nextClaimedSet.add('line3');
+            }
+            entry.claimedMilestones = Array.from(nextClaimedSet);
+            entry.milestoneWinners = {
+              ...(entry.milestoneWinners || {}),
+              [milestoneTier]: cleanName,
+            };
             entry.lastClaim = {
               playerName: cleanName,
               pattern: displayPattern,
               isFullHouse,
+              milestone: milestoneTier,
               timestamp: Date.now(),
             };
+            scheduleSaveActiveRooms();
             broadcastBingoTvState(targetBingoRoom, entry);
           }
 
@@ -1325,8 +1462,11 @@ wss.on('connection', (ws) => {
               userId: currentClient.id,
               playerName: cleanName,
               pattern: displayPattern,
+              milestone: milestoneTier,
               isFullHouse,
               roundNumber: entry?.roundNumber || 1,
+              claimedMilestones: entry?.claimedMilestones || [milestoneTier],
+              milestoneWinners: entry?.milestoneWinners || { [milestoneTier]: cleanName },
               autoNewRoundDelayMs: isFullHouse ? 4500 : 0,
               cardIndex: payload.cardIndex ?? 0,
               timestamp: Date.now()
@@ -1476,6 +1616,8 @@ wss.on('connection', (ws) => {
               playersSummary: existing?.playersSummary || [],
               themeTitle: existing?.themeTitle,
               lastClaim: existing?.lastClaim || null,
+              claimedMilestones: existing?.claimedMilestones || [],
+              milestoneWinners: existing?.milestoneWinners || {},
             };
             bingoHostRooms.set(bingoRoomId, nextEntry);
             currentClient.hostedBingoRoomId = bingoRoomId;
@@ -1602,14 +1744,19 @@ wss.on('connection', (ws) => {
           if (payload?.hostName) {
             room.hostName = sanitizeMessage(String(payload.hostName)).cleanText || 'Arrangør';
           }
-          if (payload?.edition === 'adult' || payload?.edition === 'family' || payload?.edition === 'christmas') {
+          if (
+            payload?.edition === 'adult' ||
+            payload?.edition === 'family' ||
+            payload?.edition === 'christmas' ||
+            payload?.edition === 'senior'
+          ) {
             room.edition = payload.edition;
           }
           if (typeof payload?.totalQuestions === 'number' && payload.totalQuestions > 0) {
             room.totalQuestions = payload.totalQuestions;
           }
           if (Array.isArray(payload?.teams) && payload.teams.length >= 2) {
-            room.teams = payload.teams.slice(0, 6).map((t: any) => ({
+            room.teams = payload.teams.slice(0, 30).map((t: any) => ({
               id: String(t.id),
               name: sanitizeMessage(String(t.name || 'Lag')).cleanText.slice(0, 28) || 'Lag',
               color: ['red', 'blue', 'emerald', 'amber'].includes(t.color) ? t.color : 'blue',
@@ -1635,7 +1782,7 @@ wss.on('connection', (ws) => {
             break;
           }
           if (Array.isArray(payload?.teams) && payload.teams.length >= 2) {
-            room.teams = payload.teams.slice(0, 6).map((t: any) => ({
+            room.teams = payload.teams.slice(0, 30).map((t: any) => ({
               id: String(t.id),
               name: sanitizeMessage(String(t.name || 'Lag')).cleanText.slice(0, 28) || 'Lag',
               color: ['red', 'blue', 'emerald', 'amber'].includes(t.color) ? t.color : 'blue',
@@ -1692,6 +1839,29 @@ wss.on('connection', (ws) => {
             room.participants[existingIdx] = participant;
           } else {
             room.participants.push(participant);
+            broadcastToRoom(targetQuizRoomId, {
+              type: 'quiz:participant_joined',
+              payload: {
+                participant,
+                totalCount: room.participants.length,
+                roomCode: joinCode,
+              },
+            });
+            const linkedBingoRoomId = `joy-bingo-${joinCode}`;
+            if (bingoHostRooms.has(linkedBingoRoomId)) {
+              broadcastToRoom(linkedBingoRoomId, {
+                type: 'user:joined',
+                payload: {
+                  user: {
+                    id: currentClient.id,
+                    name: participant.name,
+                    color: currentClient.color,
+                    game: 'Quiz',
+                  },
+                  participants: getRoomParticipants(linkedBingoRoomId),
+                },
+              }, ws);
+            }
           }
 
           broadcastQuizState(targetQuizRoomId, room);
@@ -1708,8 +1878,16 @@ wss.on('connection', (ws) => {
           if (!payload?.question || typeof payload?.questionIndex !== 'number') break;
 
           moveTvViewersToGame(room.roomCode, 'quiz');
-          if (payload.edition === 'adult' || payload.edition === 'family' || payload.edition === 'christmas') {
+          if (
+            payload.edition === 'adult' ||
+            payload.edition === 'family' ||
+            payload.edition === 'christmas' ||
+            payload.edition === 'senior'
+          ) {
             room.edition = payload.edition;
+          }
+          if (room.edition !== 'christmas') {
+            room.mimeState = null;
           }
           if (typeof payload.totalQuestions === 'number' && payload.totalQuestions > 0) {
             room.totalQuestions = payload.totalQuestions;
@@ -1720,6 +1898,8 @@ wss.on('connection', (ws) => {
             id: String(payload.question.id || `q-${payload.questionIndex}`),
             category: String(payload.question.category || 'Kultur'),
             questionType: payload.question.questionType === 'open_text' ? 'open_text' : 'multiple_choice',
+            musicSongId: payload.question.musicSongId ? String(payload.question.musicSongId) : undefined,
+            musicHint: payload.question.musicHint ? String(payload.question.musicHint) : undefined,
             question: String(payload.question.question || ''),
             options: Array.isArray(payload.question.options) ? payload.question.options : ['', '', '', ''],
             correctIndex: Number(payload.question.correctIndex ?? 0),
@@ -1733,7 +1913,7 @@ wss.on('connection', (ws) => {
             hostAnswerNote: String(payload.question.hostAnswerNote || ''),
           };
           room.startedAt = Date.now();
-          room.durationSec = Math.min(60, Math.max(10, Number(payload.durationSec) || 60));
+          room.durationSec = Math.min(180, Math.max(15, Number(payload.durationSec) || 60));
           room.answers = {};
           room.openTextEntries = [];
           room.mimeState = null;
@@ -1950,7 +2130,12 @@ wss.on('connection', (ws) => {
           const targetQuizRoomId = resolveQuizRoomId(currentClient, payload);
           const room = getOrCreateQuizRoom(targetQuizRoomId);
           if (!isQuizRoomHost(room, currentClient.id, payload)) break;
-          if (payload?.edition === 'adult' || payload?.edition === 'family' || payload?.edition === 'christmas') {
+          if (
+            payload?.edition === 'adult' ||
+            payload?.edition === 'family' ||
+            payload?.edition === 'christmas' ||
+            payload?.edition === 'senior'
+          ) {
             room.edition = payload.edition;
           }
           room.phase = 'lobby';
@@ -1985,6 +2170,7 @@ wss.on('connection', (ws) => {
           const targetQuizRoomId = resolveQuizRoomId(currentClient, payload);
           const room = getOrCreateQuizRoom(targetQuizRoomId);
           if (!isQuizRoomHost(room, currentClient.id, payload)) break;
+          if (room.edition !== 'christmas') break;
           moveTvViewersToGame(room.roomCode, 'quiz');
           const teamColor: 'red' | 'blue' | 'emerald' | 'amber' =
             ['red', 'blue', 'emerald', 'amber'].includes(payload?.activeTeamColor) ? payload.activeTeamColor : 'red';
@@ -2010,6 +2196,7 @@ wss.on('connection', (ws) => {
           const targetQuizRoomId = resolveQuizRoomId(currentClient, payload);
           const room = getOrCreateQuizRoom(targetQuizRoomId);
           if (!isQuizRoomHost(room, currentClient.id, payload)) break;
+          if (room.edition !== 'christmas') break;
           moveTvViewersToGame(room.roomCode, 'quiz');
           const teamColor: 'red' | 'blue' | 'emerald' | 'amber' =
             ['red', 'blue', 'emerald', 'amber'].includes(payload?.activeTeamColor) ? payload.activeTeamColor : 'red';
@@ -2035,6 +2222,7 @@ wss.on('connection', (ws) => {
           const targetQuizRoomId = resolveQuizRoomId(currentClient, payload);
           const room = getOrCreateQuizRoom(targetQuizRoomId);
           if (!isQuizRoomHost(room, currentClient.id, payload)) break;
+          if (room.edition !== 'christmas') break;
           if (room.mimeState) {
             const guessedCorrect = Boolean(payload?.guessedCorrect);
             const points = Math.max(0, Number(payload?.points || 0));
@@ -2128,6 +2316,261 @@ wss.on('connection', (ws) => {
             currentClient.activeQuizRoomId = undefined;
           }
           saveActiveRoomsNow();
+          break;
+        }
+
+        case 'music:host_sync': {
+          const code = cleanRoomCode(
+            payload?.roomCode || currentClient.hostedBingoRoomId?.replace(/^joy-bingo-/i, '') || currentClient.roomId.replace(/^joy-bingo-/i, '')
+          );
+          if (!code || code.length < 3) break;
+          const existing = musicBingoRooms.get(code);
+          const incomingKey = payload?.hostKey ? String(payload.hostKey) : undefined;
+          if (existing && existing.hostId && existing.hostId !== currentClient.id) {
+            if (!existing.hostKey || !incomingKey || existing.hostKey !== incomingKey) {
+              break;
+            }
+          }
+          const mRoom: MusicBingoRoomState = existing || {
+            roomCode: code,
+            hostId: currentClient.id,
+            hostKey: incomingKey,
+            hostName: sanitizeMessage(String(payload?.hostName || currentClient.name || 'Arrangør')).cleanText || 'Arrangør',
+            roundNumber: 1,
+            isActive: true,
+            playedSongIds: [],
+            currentSongId: null,
+            revealCurrentSong: false,
+            clipStartedAt: 0,
+            clipDurationSec: 30,
+            lastClaim: null,
+            claimedMilestones: [],
+            milestoneWinners: {},
+            participants: new Map(),
+          };
+          mRoom.hostId = currentClient.id;
+          if (incomingKey) mRoom.hostKey = incomingKey;
+          if (payload?.hostName) {
+            mRoom.hostName = sanitizeMessage(String(payload.hostName)).cleanText || mRoom.hostName;
+          }
+          mRoom.isActive = true;
+          if (typeof payload?.roundNumber === 'number' && payload.roundNumber > 0) {
+            mRoom.roundNumber = payload.roundNumber;
+          }
+          if (Array.isArray(payload?.playedSongIds)) {
+            mRoom.playedSongIds = payload.playedSongIds.slice(0, 80).map((s: any) => String(s));
+          }
+          if (payload?.currentSongId !== undefined) {
+            mRoom.currentSongId = payload.currentSongId ? String(payload.currentSongId) : null;
+          }
+          if (typeof payload?.revealCurrentSong === 'boolean') {
+            mRoom.revealCurrentSong = payload.revealCurrentSong;
+          }
+          if (typeof payload?.clipStartedAt === 'number') {
+            mRoom.clipStartedAt = payload.clipStartedAt;
+          }
+          if (typeof payload?.clipDurationSec === 'number' && payload.clipDurationSec > 0) {
+            mRoom.clipDurationSec = Math.min(120, Math.max(5, payload.clipDurationSec));
+          }
+          if (payload?.lastClaim === null) {
+            mRoom.lastClaim = null;
+          }
+          musicBingoRooms.set(code, mRoom);
+          ensureUnifiedArrangementRooms(code, currentClient.id, mRoom.hostName, mRoom.hostKey);
+          broadcastMusicBingoState(code, mRoom);
+          break;
+        }
+
+        case 'music:new_round': {
+          const code = cleanRoomCode(payload?.roomCode);
+          if (!code) break;
+          const mRoom = musicBingoRooms.get(code);
+          if (!mRoom) break;
+          const incomingKey = payload?.hostKey ? String(payload.hostKey) : undefined;
+          if (mRoom.hostId !== currentClient.id && (!mRoom.hostKey || !incomingKey || mRoom.hostKey !== incomingKey)) {
+            break;
+          }
+          mRoom.roundNumber = (mRoom.roundNumber || 1) + 1;
+          mRoom.playedSongIds = [];
+          mRoom.currentSongId = null;
+          mRoom.revealCurrentSong = false;
+          mRoom.clipStartedAt = 0;
+          mRoom.lastClaim = null;
+          mRoom.claimedMilestones = [];
+          mRoom.milestoneWinners = {};
+          for (const [uid, prog] of mRoom.participants.entries()) {
+            mRoom.participants.set(uid, { ...prog, markedCount: 0, linesCompleted: 0, hasBingo: false });
+          }
+          broadcastMusicBingoState(code, mRoom);
+          break;
+        }
+
+        case 'music:request_state': {
+          const code = cleanRoomCode(payload?.roomCode || currentClient.roomId.replace(/^joy-(bingo|quiz)-/i, ''));
+          if (!code) break;
+          const mRoom = musicBingoRooms.get(code);
+          if (mRoom && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'music:state', payload: serializeMusicRoom(mRoom) }));
+          }
+          break;
+        }
+
+        case 'music:player_progress': {
+          const code = cleanRoomCode(payload?.roomCode || currentClient.roomId.replace(/^joy-(bingo|quiz)-/i, ''));
+          if (!code) break;
+          let mRoom = musicBingoRooms.get(code);
+          if (!mRoom) {
+            mRoom = {
+              roomCode: code,
+              hostId: '',
+              hostName: 'Arrangør',
+              roundNumber: 1,
+              isActive: true,
+              playedSongIds: [],
+              currentSongId: null,
+              revealCurrentSong: false,
+              clipStartedAt: 0,
+              clipDurationSec: 30,
+              lastClaim: null,
+              claimedMilestones: [],
+              milestoneWinners: {},
+              participants: new Map(),
+            };
+            musicBingoRooms.set(code, mRoom);
+          }
+          const cleanName = sanitizeMessage(String(payload?.playerName || currentClient.name || 'Deltaker')).cleanText || 'Deltaker';
+          const isNewMusicParticipant = !mRoom.participants.has(currentClient.id);
+          if (cleanName && (!currentClient.name || currentClient.name === 'Spiller' || currentClient.name === 'Deltaker')) {
+            currentClient.name = cleanName;
+          }
+          const bingoRoomId = `joy-bingo-${code}`;
+          if (currentClient.hostedBingoRoomId !== bingoRoomId && !currentClient.isTvViewer) {
+            currentClient.joinedBingoRoomId = bingoRoomId;
+          }
+          const participantProgress: MusicBingoParticipantProgress = {
+            id: currentClient.id,
+            name: cleanName,
+            markedCount: Math.max(0, Math.min(25, Math.trunc(Number(payload?.markedCount) || 0))),
+            linesCompleted: Math.max(0, Math.trunc(Number(payload?.linesCompleted) || 0)),
+            hasBingo: Boolean(payload?.hasBingo),
+          };
+          mRoom.participants.set(currentClient.id, participantProgress);
+          if (isNewMusicParticipant && currentClient.id !== mRoom.hostId) {
+            broadcastToRoom(bingoRoomId, {
+              type: 'music:participant_joined',
+              payload: {
+                participant: participantProgress,
+                totalCount: mRoom.participants.size,
+                roomCode: code,
+              },
+            }, ws);
+            broadcastToRoom(bingoRoomId, {
+              type: 'user:joined',
+              payload: {
+                user: {
+                  id: currentClient.id,
+                  name: cleanName,
+                  color: currentClient.color,
+                  game: 'Musikkbingo',
+                },
+                participants: getRoomParticipants(bingoRoomId),
+              },
+            }, ws);
+            const bEntry = bingoHostRooms.get(bingoRoomId);
+            if (bEntry) {
+              broadcastBingoTvState(bingoRoomId, bEntry);
+            }
+          }
+          broadcastMusicBingoState(code, mRoom);
+          break;
+        }
+
+        case 'music:claim_bingo': {
+          const code = cleanRoomCode(payload?.roomCode || currentClient.roomId.replace(/^joy-(bingo|quiz)-/i, ''));
+          if (!code) break;
+          const mRoom = musicBingoRooms.get(code);
+          if (!mRoom) break;
+          const cleanName = sanitizeMessage(String(payload?.playerName || currentClient.name || 'Deltaker')).cleanText || 'Deltaker';
+          const cleanPattern = sanitizeMessage(String(payload?.pattern || 'MUSIKKBINGO')).cleanText || 'MUSIKKBINGO';
+          const isFull = Boolean(payload?.hasFullHouse) || /fullt?\s*brett|full_?house|blackout/i.test(cleanPattern);
+          const tier = resolveBingoMilestoneFromPattern(cleanPattern, isFull);
+          const claimedList = Array.isArray(mRoom.claimedMilestones) ? mRoom.claimedMilestones : [];
+          if (claimedList.includes(tier)) {
+            const prevWinner = mRoom.milestoneWinners?.[tier];
+            const tierLabel = tier === 'fullbrett' ? 'Fullt brett' : tier === 'line3' ? '3. rekker' : '1. rekke';
+            ws.send(JSON.stringify({
+              type: 'music:claim_rejected',
+              payload: {
+                milestone: tier,
+                claimedMilestones: claimedList,
+                milestoneWinners: mRoom.milestoneWinners || {},
+                message: prevWinner
+                  ? `🔒 ${tierLabel} er allerede ropt av ${prevWinner}! Vent til neste rekke/brett er fullført.`
+                  : `🔒 ${tierLabel} er allerede ropt! Vent til neste rekke/brett er fullført.`,
+              },
+            }));
+            break;
+          }
+
+          const trackedProg = mRoom.participants.get(currentClient.id);
+          const reportedLines =
+            typeof payload?.linesCompleted === 'number'
+              ? payload.linesCompleted
+              : trackedProg?.linesCompleted;
+          const requiredLines = tier === 'fullbrett' ? 10 : tier === 'line3' ? 3 : 1;
+          if (typeof reportedLines === 'number' && reportedLines < requiredLines) {
+            ws.send(JSON.stringify({
+              type: 'music:claim_rejected',
+              payload: {
+                milestone: tier,
+                claimedMilestones: claimedList,
+                milestoneWinners: mRoom.milestoneWinners || {},
+                message: `🔒 Du må ha fylt minst ${requiredLines} ${requiredLines === 1 ? 'hel rekke' : 'rekker'} på brettet før du kan rope BINGO!`,
+              },
+            }));
+            break;
+          }
+
+          const nextSet = new Set<ServerBingoMilestone>(claimedList);
+          nextSet.add(tier);
+          if (tier === 'line3' || tier === 'fullbrett') nextSet.add('line1');
+          if (tier === 'fullbrett') nextSet.add('line3');
+          mRoom.claimedMilestones = Array.from(nextSet);
+          mRoom.milestoneWinners = {
+            ...(mRoom.milestoneWinners || {}),
+            [tier]: cleanName,
+          };
+          const claimTimestamp = Date.now();
+          mRoom.lastClaim = {
+            playerName: cleanName,
+            pattern: cleanPattern,
+            timestamp: claimTimestamp,
+          };
+          broadcastMusicBingoState(code, mRoom);
+
+          const musicClaimNotice = JSON.stringify({
+            type: 'music:bingo_claimed',
+            payload: {
+              roomCode: code,
+              playerName: cleanName,
+              pattern: cleanPattern,
+              milestone: tier,
+              isFullHouse: tier === 'fullbrett',
+              claimedMilestones: mRoom.claimedMilestones,
+              milestoneWinners: mRoom.milestoneWinners,
+              timestamp: claimTimestamp,
+            },
+          });
+          const bingoRoomId = `joy-bingo-${code}`;
+          const quizRoomId = `joy-quiz-${code}`;
+          for (const [clientWs, client] of clients.entries()) {
+            if (
+              clientWs.readyState === WebSocket.OPEN &&
+              (isClientInRoom(client, bingoRoomId) || isClientInRoom(client, quizRoomId) || client.tvWatchCode === code)
+            ) {
+              clientWs.send(musicClaimNotice);
+            }
+          }
           break;
         }
       }
@@ -2494,12 +2937,13 @@ app.get('/api/rooms/state', async (req, res) => {
   await hydrateRoomFromFirestoreIfNeeded(cleanCode);
   const entry = bingoHostRooms.get(`joy-bingo-${cleanCode}`);
   const qRoom = quizRooms.get(`joy-quiz-${cleanCode}`);
+  const mRoom = musicBingoRooms.get(cleanCode);
   const hasBingo = Boolean(entry);
   const hasQuiz = Boolean(qRoom && qRoom.isHostActive);
   return res.json({
-    valid: hasBingo || hasQuiz,
+    valid: hasBingo || hasQuiz || Boolean(mRoom),
     activeGame: activeTvGameByCode.get(cleanCode) || (hasBingo ? 'bingo' : hasQuiz ? 'quiz' : null),
-    hostName: entry?.hostName || qRoom?.hostName || 'Arrangør',
+    hostName: entry?.hostName || qRoom?.hostName || mRoom?.hostName || 'Arrangør',
     roundNumber: entry?.roundNumber || 1,
     calledBalls: entry?.calledBalls || [],
     playersSummary: entry ? buildMergedBingoPlayersSummary(entry) : [],
@@ -2507,9 +2951,12 @@ app.get('/api/rooms/state', async (req, res) => {
       ? getRoomParticipants(entry.roomId).filter((p) => p.id !== entry.hostId)
       : [],
     lastClaim: entry?.lastClaim || null,
+    claimedMilestones: entry?.claimedMilestones || [],
+    milestoneWinners: entry?.milestoneWinners || {},
     showCodeOnScreen: Boolean(entry?.showCodeOnScreen ?? qRoom?.showCodeOnScreen ?? true),
     edition: qRoom?.edition || 'adult',
     quizSnapshot: hasQuiz && qRoom ? serializeQuizRoomPublic(qRoom, false) : null,
+    musicSnapshot: mRoom ? serializeMusicRoom(mRoom) : null,
   });
 });
 
@@ -3542,6 +3989,56 @@ app.get('/api/stripe/verify-session', async (req, res) => {
     console.error('Error verifying Stripe session:', err);
     res.status(500).json({ success: false, error: err?.message || 'Kunne ikke hente Stripe-sesjon.' });
   }
+});
+
+const musicPreviewCache = new Map<string, { previewUrl: string | null; expiresAt: number }>();
+
+app.get('/api/music-preview', async (req, res) => {
+  const title = String(req.query.title || '').trim().slice(0, 120);
+  const artist = String(req.query.artist || '').trim().slice(0, 120);
+  const songId = String(req.query.id || `${title}-${artist}`).trim().slice(0, 80);
+
+  if (!title && !artist) {
+    return res.json({ ok: false, previewUrl: null });
+  }
+
+  const cached = musicPreviewCache.get(songId);
+  if (cached && cached.expiresAt > Date.now()) {
+    return res.json({ ok: true, previewUrl: cached.previewUrl });
+  }
+
+  const queryTerm = `${title} ${artist}`.trim();
+  const tryLookup = async (country?: string): Promise<string | null> => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 3800);
+    try {
+      const url = new URL('https://itunes.apple.com/search');
+      url.searchParams.set('term', queryTerm);
+      url.searchParams.set('media', 'music');
+      url.searchParams.set('entity', 'song');
+      url.searchParams.set('limit', '5');
+      if (country) url.searchParams.set('country', country);
+      const r = await fetch(url.toString(), { signal: controller.signal });
+      if (!r.ok) return null;
+      const data = (await r.json()) as { results?: Array<{ previewUrl?: string; trackName?: string; artistName?: string }> };
+      const results = Array.isArray(data?.results) ? data.results : [];
+      const firstWithPreview = results.find(
+        (item) => typeof item?.previewUrl === 'string' && item.previewUrl.startsWith('https://')
+      );
+      return firstWithPreview?.previewUrl || null;
+    } catch {
+      return null;
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+
+  const previewUrl = (await tryLookup('NO')) || (await tryLookup());
+  musicPreviewCache.set(songId, {
+    previewUrl,
+    expiresAt: Date.now() + 6 * 60 * 60 * 1000,
+  });
+  return res.json({ ok: true, previewUrl });
 });
 
 app.get(['/api/health', '/healthz'], (_req, res) => {

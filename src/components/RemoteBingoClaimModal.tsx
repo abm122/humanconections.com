@@ -112,6 +112,26 @@ export const RemoteBingoClaimModal: React.FC<RemoteBingoClaimModalProps> = ({
 
   if (!claim) return null;
 
+  const resolvedTier =
+    claim.milestone ||
+    (claim.isFullHouse || /fullbrett|fullt?\s*brett/i.test(claim.pattern)
+      ? 'fullbrett'
+      : /3\s*\.?\s*rekke/i.test(claim.pattern)
+      ? 'line3'
+      : 'line1');
+  const tierLabel =
+    resolvedTier === 'fullbrett'
+      ? 'Fullt brett'
+      : resolvedTier === 'line3'
+      ? '3. rekker'
+      : '1. rekke';
+  const nextLevelLabel =
+    resolvedTier === 'line1'
+      ? '3. rekker'
+      : resolvedTier === 'line3'
+      ? 'Full brett'
+      : 'Ny runde';
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/90 backdrop-blur-md animate-fadeIn">
       <div className="relative w-full max-w-md bg-gradient-to-b from-[#2e1708] via-[#1c0d05] to-[#0a0603] border-4 border-amber-400 rounded-3xl p-6 sm:p-8 text-center shadow-2xl text-amber-50 overflow-hidden">
@@ -131,23 +151,23 @@ export const RemoteBingoClaimModal: React.FC<RemoteBingoClaimModalProps> = ({
           </div>
 
           <div>
-            <span className="px-3 py-1 rounded-full bg-amber-500/20 text-amber-300 border border-amber-400/40 text-xs font-mono font-bold uppercase tracking-widest inline-block mb-2">
-              {claim.isFullHouse ? 'Fullbrett Bingo · Ny runde følger' : 'Direktesendt Avstandsbingo'}
+            <span className="px-3 py-1 rounded-full bg-emerald-500/25 text-emerald-200 border border-emerald-400/50 text-xs font-mono font-bold uppercase tracking-widest inline-block mb-2">
+              {claim.isFullHouse ? '✓ Bekreftet Fullbrett · Ny runde følger' : `✓ Bekreftet ${tierLabel} · Neste: ${nextLevelLabel}`}
             </span>
             <h2 className="font-heading font-black text-3xl sm:text-4xl text-amber-200 tracking-wide">
-              {claim.isFullHouse ? 'FULLBRETT BINGO!' : 'BINGO ROPT!'}
+              {claim.isFullHouse ? 'FULLBRETT BINGO!' : `${tierLabel.toUpperCase()} BINGO!`}
             </h2>
           </div>
 
           <div className="p-4 rounded-2xl bg-black/60 border border-amber-500/40 space-y-2">
             <div className="text-sm text-amber-300 font-bold">
-              Spiller som ropte bingo:
+              Deltaker som har fylt {tierLabel.toLowerCase()} og trykket BINGO:
             </div>
             <div className="font-heading font-black text-2xl sm:text-3xl text-amber-100 tracking-wide">
               {claim.playerName}
             </div>
             <div className="text-xs text-emerald-400 font-mono font-bold flex items-center justify-center gap-1.5 pt-1">
-              <span>🎯 Mønster:</span>
+              <span>🎯 Bekreftet mønster:</span>
               <span className="bg-emerald-500/20 px-2 py-0.5 rounded-md border border-emerald-500/30">
                 {claim.pattern}
               </span>
@@ -160,35 +180,67 @@ export const RemoteBingoClaimModal: React.FC<RemoteBingoClaimModalProps> = ({
               <span>Ny runde starter automatisk om {countdownSec}s...</span>
             </div>
           ) : (
-            <p className="text-xs text-amber-200/80 leading-relaxed">
-              {isHost
-                ? 'En deltaker har ropt bingo på sin enhet! Kontroller brettet eller start ny runde.'
-                : 'En deltaker i dette rommet har oppnådd bingo! Gratulerer!'}
-            </p>
+            <div className="p-3.5 rounded-2xl bg-cyan-950/60 border border-cyan-400/50 text-cyan-100 text-xs sm:text-sm font-bold leading-relaxed space-y-1">
+              <div className="text-amber-200 font-black">
+                ➡️ Spillet fortsetter nå til {nextLevelLabel}!
+              </div>
+              <div className="text-[11px] text-cyan-200/90">
+                {resolvedTier === 'line1'
+                  ? '1. rekke er nå fullført og låst for alle. Rop BINGO åpnes igjen når du fyller 3. rekker!'
+                  : '1. og 3. rekker er nå fullført og låst for alle. Rop BINGO åpnes igjen ved fullt brett!'}
+              </div>
+            </div>
           )}
 
           <div className="pt-2 flex flex-col sm:flex-row gap-2.5">
-            {isHost && onStartNewRoundNow ? (
-              <button
-                onClick={() => {
-                  sounds.playLineComplete();
-                  onStartNewRoundNow();
-                  onClose();
-                }}
-                className="flex-1 py-3 px-4 rounded-xl bg-gradient-to-r from-emerald-400 to-teal-400 hover:brightness-110 text-slate-950 font-black text-sm cursor-pointer shadow-lg transition-all"
-              >
-                🔄 Start ny runde nå
-              </button>
+            {claim.isFullHouse ? (
+              isHost && onStartNewRoundNow ? (
+                <button
+                  onClick={() => {
+                    sounds.playLineComplete();
+                    onStartNewRoundNow();
+                    onClose();
+                  }}
+                  className="flex-1 py-3 px-4 rounded-xl bg-gradient-to-r from-emerald-400 to-teal-400 hover:brightness-110 text-slate-950 font-black text-sm cursor-pointer shadow-lg transition-all"
+                >
+                  🔄 Start ny runde nå
+                </button>
+              ) : (
+                <button
+                  onClick={() => {
+                    sounds.playLineComplete();
+                    onClose();
+                  }}
+                  className="flex-1 py-3 px-4 rounded-xl bg-gradient-to-r from-amber-500 to-amber-400 hover:from-amber-400 hover:to-amber-300 text-black font-black text-sm cursor-pointer shadow-lg transition-all"
+                >
+                  🎉 Gratulerer vinneren!
+                </button>
+              )
             ) : (
-              <button
-                onClick={() => {
-                  sounds.playLineComplete();
-                  onClose();
-                }}
-                className="flex-1 py-3 px-4 rounded-xl bg-gradient-to-r from-amber-500 to-amber-400 hover:from-amber-400 hover:to-amber-300 text-black font-black text-sm cursor-pointer shadow-lg transition-all"
-              >
-                🎉 Gratulerer vinneren!
-              </button>
+              <>
+                <button
+                  onClick={() => {
+                    sounds.playLineComplete();
+                    onClose();
+                  }}
+                  className="flex-1 py-3 px-4 rounded-xl bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 text-slate-950 font-black text-sm cursor-pointer shadow-lg transition-all"
+                >
+                  ➡️ Fortsett til {nextLevelLabel}
+                </button>
+                {isHost && onStartNewRoundNow && (
+                  <button
+                    onClick={() => {
+                      sounds.playClick();
+                      onStartNewRoundNow();
+                      onClose();
+                    }}
+                    className="py-3 px-3.5 rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 text-amber-100 text-xs font-bold cursor-pointer transition-all"
+                    title="Start en helt ny runde i stedet for å fortsette"
+                  >
+                    🔄 Ny runde
+                  </button>
+                )}
+              </>
             )}
 
             <button

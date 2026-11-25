@@ -295,7 +295,7 @@ service cloud.firestore {
       data.activeGame in ['bingo', 'quiz'] &&
       data.hasBingo is bool &&
       data.hasQuiz is bool &&
-      data.edition in ['adult', 'family', 'christmas'] &&
+      data.edition in ['adult', 'family', 'christmas', 'senior'] &&
       data.calledBallNumbers is list &&
       data.calledBallNumbers.size() <= 75 &&
       (data.calledBallNumbers.size() == 0 || (

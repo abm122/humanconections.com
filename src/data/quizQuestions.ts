@@ -13,10 +13,20 @@ import { CHRISTMAS_MC_QUESTIONS } from './quizQuestionsChristmas';
 import { CHRISTMAS_OPEN_TEXT_QUESTIONS } from './quizQuestionsChristmasOpen';
 import { CHRISTMAS_EXTRA_QUESTIONS } from './quizQuestionsChristmasExtra';
 import { CHRISTMAS_MIME_CARDS, QuizMimeCard } from './quizMimeWordsChristmas';
+import { SENIOR_QUIZ_QUESTIONS as SENIOR_MC_AND_OPEN_QUESTIONS } from './quizQuestionsSenior';
+import { SENIOR_MUSIC_QUIZ_QUESTIONS } from './quizQuestionsSeniorMusic';
 
-export type QuizEdition = 'adult' | 'family' | 'christmas';
+export type QuizEdition = 'adult' | 'family' | 'christmas' | 'senior';
 
-export type QuizCategory = 'Musikk' | 'Kultur' | 'Fans & Popkultur' | 'Ordlek & Humor';
+export type QuizCategory =
+  | 'Musikk'
+  | 'Musikk-gjetting'
+  | 'Kultur'
+  | 'Fans & Popkultur'
+  | 'Ordlek & Humor'
+  | 'Ungdomsminner'
+  | 'Grenland & Skien'
+  | 'Allmennkunnskap';
 
 export type QuizQuestionType = 'multiple_choice' | 'open_text';
 
@@ -25,6 +35,8 @@ export interface QuizQuestion {
   edition: QuizEdition;
   category: QuizCategory;
   questionType?: QuizQuestionType;
+  musicSongId?: string;
+  musicHint?: string;
   question: string;
   options: [string, string, string, string];
   correctIndex: 0 | 1 | 2 | 3;
@@ -58,6 +70,11 @@ export const CHRISTMAS_QUIZ_QUESTIONS: QuizQuestion[] = normalizeEditionPool(
   'christmas'
 );
 
+export const SENIOR_QUIZ_QUESTIONS: QuizQuestion[] = normalizeEditionPool(
+  [...SENIOR_MUSIC_QUIZ_QUESTIONS, ...SENIOR_MC_AND_OPEN_QUESTIONS],
+  'senior'
+);
+
 export {
   ADULT_MC_QUESTIONS,
   ADULT_OPEN_TEXT_QUESTIONS,
@@ -69,6 +86,7 @@ export {
   CHRISTMAS_OPEN_TEXT_QUESTIONS,
   CHRISTMAS_EXTRA_QUESTIONS,
   CHRISTMAS_MIME_CARDS,
+  SENIOR_MUSIC_QUIZ_QUESTIONS,
 };
 export type { QuizMimeCard };
 
@@ -78,6 +96,7 @@ export type { QuizMimeCard };
 export function getQuestionsForEdition(edition: QuizEdition): QuizQuestion[] {
   if (edition === 'christmas') return CHRISTMAS_QUIZ_QUESTIONS;
   if (edition === 'family') return FAMILY_QUIZ_QUESTIONS;
+  if (edition === 'senior') return SENIOR_QUIZ_QUESTIONS;
   return ADULT_QUIZ_QUESTIONS;
 }
 

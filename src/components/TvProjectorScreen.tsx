@@ -3,11 +3,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { sounds } from '../audio/soundEngine';
 import { BallCageCanvas } from './BallCageCanvas';
 import { RilMusicPlayer } from './RilMusicPlayer';
+import { LanguageSelector } from './LanguageSelector';
 import { JOYFUL_BALLS_MAP } from '../data/prompts';
+import { MUSIC_BINGO_SONGS } from '../data/musicBingoSongs';
 import { CalledBall } from '../types/bingo';
 import { BingoTvState, remoteBingo } from '../services/remoteBingo';
 import { firebasePersistence } from '../services/firebasePersistence';
@@ -73,6 +75,7 @@ export const TvProjectorScreen: React.FC<TvProjectorScreenProps> = ({
   const [isConnecting, setIsConnecting] = useState<boolean>(false);
   const [connectError, setConnectError] = useState<string | null>(null);
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
+  const [isMuted, setIsMuted] = useState<boolean>(() => sounds.getMuted());
 
   const [bingoTvState, setBingoTvState] = useState<BingoTvState | null>(() =>
     remoteBingo.getTvState()
@@ -81,6 +84,8 @@ export const TvProjectorScreen: React.FC<TvProjectorScreenProps> = ({
     quizService.getSnapshot()
   );
   const [remainingSec, setRemainingSec] = useState<number>(60);
+  const tvSpeechSeededRef = useRef<boolean>(false);
+  const prevTvBallCountRef = useRef<number>(0);
 
   const connectToRoomAsTv = async (
     rawCode: string,
@@ -219,6 +224,33 @@ export const TvProjectorScreen: React.FC<TvProjectorScreenProps> = ({
     }));
   }, [bingoTvState?.calledBalls]);
 
+  // Announce newly drawn balls on TV / Projector strictly in the selected menu language
+  useEffect(() => {
+    const balls = bingoTvState?.calledBalls || [];
+    if (!connectedCode || activeGame !== 'bingo') {
+      tvSpeechSeededRef.current = false;
+      prevTvBallCountRef.current = 0;
+      return;
+    }
+    if (!tvSpeechSeededRef.current) {
+      tvSpeechSeededRef.current = true;
+      prevTvBallCountRef.current = balls.length;
+      return;
+    }
+    if (balls.length === 0) {
+      prevTvBallCountRef.current = 0;
+      return;
+    }
+    if (balls.length > prevTvBallCountRef.current) {
+      const latest = balls[balls.length - 1];
+      if (latest) {
+        sounds.playBallDrop();
+        sounds.speakBall(latest.letter, latest.number, latest.affirmation);
+      }
+      prevTvBallCountRef.current = balls.length;
+    }
+  }, [connectedCode, activeGame, bingoTvState?.calledBalls]);
+
   const toggleFullscreen = () => {
     if (!document.fullscreenElement) {
       document.documentElement.requestFullscreen?.().catch(() => {});
@@ -334,7 +366,8 @@ export const TvProjectorScreen: React.FC<TvProjectorScreenProps> = ({
   const quizPhase = quizSnapshot?.phase || 'lobby';
   const quizTeams = quizSnapshot?.teams || DEFAULT_QUIZ_TEAMS;
   const publicQuestion = quizSnapshot?.currentQuestion || null;
-  const timeProgressPct = Math.max(0, Math.min(100, (remainingSec / 60) * 100));
+  const quizDurationSec = quizSnapshot?.durationSec || 60;
+  const timeProgressPct = Math.max(0, Math.min(100, (remainingSec / quizDurationSec) * 100));
   const sortedQuizLeaderboard = [...quizTeams].sort(
     (a, b) => (quizSnapshot?.teamScores?.[b.id] || 0) - (quizSnapshot?.teamScores?.[a.id] || 0)
   );
@@ -355,6 +388,8 @@ export const TvProjectorScreen: React.FC<TvProjectorScreenProps> = ({
                 ? '🎄'
                 : quizEdition === 'family'
                 ? '🎈'
+                : quizEdition === 'senior'
+                ? '👵'
                 : '🎭'
               : '📺'}
           </div>
@@ -366,6 +401,8 @@ export const TvProjectorScreen: React.FC<TvProjectorScreenProps> = ({
                     ? 'QUIZ · STORSKJERM / TV'
                     : quizEdition === 'family'
                     ? 'FAMILIEQUIZ · STORSKJERM / TV'
+                    : quizEdition === 'senior'
+                    ? 'SENIOR GRENLAND QUIZ · STORSKJERM / TV'
                     : 'JULEQUIZ · STORSKJERM / TV'
                   : 'INJOY TOGETHER · STORSKJERM / TV'}
               </h1>
@@ -431,6 +468,21 @@ export const TvProjectorScreen: React.FC<TvProjectorScreenProps> = ({
             </button>
           </div>
 
+          <LanguageSelector variant="compact" />
+
+          <button
+            type="button"
+            onClick={() => {
+              const m = sounds.toggleMute();
+              setIsMuted(m);
+            }}
+            aria-label={isMuted ? 'Slå på lyd og stemme' : 'Demp lyd og stemme'}
+            title={isMuted ? 'Slå på opplesing og lyd' : 'Demp opplesing og lyd'}
+            className="px-2.5 py-2 rounded-xl bg-amber-950/70 border border-amber-500/40 hover:border-amber-300 text-amber-200 text-xs font-bold cursor-pointer"
+          >
+            {isMuted ? '🔇' : '🔊'}
+          </button>
+
           <RilMusicPlayer variant="compact" />
 
           <button
@@ -455,25 +507,32 @@ export const TvProjectorScreen: React.FC<TvProjectorScreenProps> = ({
 
       {/* BINGO STORSKJERM / TV MODE */}
       {activeGame === 'bingo' && (
-        <main className="flex-1 max-w-[1800px] mx-auto w-full py-4 space-y-5">
-          {bingoTvState?.lastClaim && (
-            <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-amber-500 via-rose-500 to-amber-500 text-white text-center shadow-2xl border-2 border-white animate-pulse space-y-1">
-              <div className="font-heading font-black text-xl sm:text-3xl">
-                🎉 {bingoTvState.lastClaim.isFullHouse || /fullbrett/i.test(bingoTvState.lastClaim.pattern) ? 'FULLBRETT BINGO FRA' : 'BINGO ROP FRA'}{' '}
-                {bingoTvState.lastClaim.playerName.toUpperCase()}! ({bingoTvState.lastClaim.pattern}) 🎉
-              </div>
-              {(bingoTvState.lastClaim.isFullHouse || /fullbrett/i.test(bingoTvState.lastClaim.pattern)) && (
-                <div className="text-xs sm:text-sm font-black text-amber-100">
-                  🔄 Ny bingorunde starter automatisk for hele salen om få sekunder...
+        <main className="flex-1 max-w-[1880px] mx-auto w-full py-4 space-y-5">
+          {bingoTvState?.lastClaim && (() => {
+            const isFull =
+              bingoTvState.lastClaim.isFullHouse || /fullbrett|fullt?\s*brett/i.test(bingoTvState.lastClaim.pattern);
+            const isLine3 = !isFull && /3\s*\.?\s*rekke/i.test(bingoTvState.lastClaim.pattern);
+            const tierText = isFull ? 'FULLT BRETT' : isLine3 ? '3. REKKER' : '1. REKKE';
+            return (
+              <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-amber-500 via-rose-500 to-amber-500 text-white text-center shadow-2xl border-2 border-white space-y-1">
+                <div className="font-heading font-black text-xl sm:text-3xl">
+                  🏆 {bingoTvState.lastClaim.playerName.toUpperCase()} HAR FYLT {tierText} OG TRYKKET BINGO! 🏆
                 </div>
-              )}
-            </div>
-          )}
+                <div className="text-xs sm:text-sm font-black text-amber-100">
+                  {isFull
+                    ? '🔄 Ny bingorunde starter automatisk for hele salen om få sekunder...'
+                    : isLine3
+                    ? '➡️ Spillet fortsetter nå til FULLT BRETT! (1. og 3. rekker er låst)'
+                    : '➡️ Spillet fortsetter nå til 3. REKKER! (1. rekke er låst)'}
+                </div>
+              </div>
+            );
+          })()}
 
           <div className="grid grid-cols-1 md:grid-cols-12 gap-6 items-start">
-            {/* Left 5 cols: Sticky Read-Only 3D Tumbler & Current Drawn Ball */}
+            {/* Left 5 cols: Large Responsive 3D Tumbler for TV & Projector */}
             <div className="md:col-span-5 md:sticky md:top-3 self-start md:max-h-[calc(100vh-2rem)] md:overflow-y-auto no-scrollbar space-y-4">
-              <div className="p-3 rounded-3xl bg-black/65 border-2 border-amber-400/40 shadow-2xl">
+              <div className="p-3 sm:p-4 rounded-3xl bg-black/65 border-2 border-amber-400/40 shadow-2xl">
                 <BallCageCanvas
                   calledBalls={calledBalls}
                   uncalledBalls={uncalledBalls}
@@ -481,8 +540,32 @@ export const TvProjectorScreen: React.FC<TvProjectorScreenProps> = ({
                   onToggleAuto={() => {}}
                   canDraw={false}
                   readOnlyMessage="🔒 Arrangøren styrer kuletrekningen privat"
-                  compactSidebar={true}
+                  compactSidebar={false}
+                  tumblerSize="tv"
+                  layout="stacked"
                 />
+              </div>
+
+              {/* Room-Wide Locked Milestone Status for TV Audience */}
+              <div className="p-3.5 rounded-2xl bg-black/55 border border-amber-500/30 flex flex-wrap items-center justify-center gap-2">
+                {(['line1', 'line3', 'fullbrett'] as const).map((tier) => {
+                  const locked = (bingoTvState?.claimedMilestones || []).includes(tier);
+                  const winner = bingoTvState?.milestoneWinners?.[tier];
+                  const label = tier === 'line1' ? '1. rekke' : tier === 'line3' ? '3. rekker' : 'Full brett';
+                  return (
+                    <span
+                      key={tier}
+                      className={`px-3 py-1 rounded-xl text-xs font-black border ${
+                        locked
+                          ? 'bg-emerald-500/20 border-emerald-400/60 text-emerald-200'
+                          : 'bg-white/5 border-white/15 text-amber-200/75'
+                      }`}
+                    >
+                      {locked ? '✓' : '○'} {label}
+                      {winner ? ` (${winner})` : locked ? ' · Ropt' : ''}
+                    </span>
+                  );
+                })}
               </div>
 
               <div className="p-5 rounded-3xl bg-gradient-to-r from-amber-950/60 via-[#1f1207] to-amber-950/60 border-2 border-amber-400/50 shadow-xl flex items-center gap-4">
@@ -649,7 +732,7 @@ export const TvProjectorScreen: React.FC<TvProjectorScreenProps> = ({
               </div>
 
               {(quizPhase === 'question' ||
-                (quizSnapshot?.mimeState?.active && quizSnapshot.mimeState.status === 'acting')) && (
+                (quizEdition === 'christmas' && quizSnapshot?.mimeState?.active && quizSnapshot.mimeState.status === 'acting')) && (
                 <div
                   className={`px-5 py-2 rounded-2xl border-2 font-mono tabular-nums font-black text-3xl ${
                     remainingSec <= 10
@@ -662,7 +745,7 @@ export const TvProjectorScreen: React.FC<TvProjectorScreenProps> = ({
               )}
             </div>
 
-            {quizSnapshot?.mimeState?.active ? (
+            {quizEdition === 'christmas' && quizSnapshot?.mimeState?.active ? (
               <div className="py-10 text-center space-y-5">
                 {quizSnapshot.mimeState.status === 'choosing' && (
                   <>
@@ -719,10 +802,18 @@ export const TvProjectorScreen: React.FC<TvProjectorScreenProps> = ({
                 {quizPhase === 'lobby' && (
                   <div className="py-12 text-center space-y-4">
                     <div className="text-6xl">
-                      {quizEdition === 'adult' ? '🎤' : quizEdition === 'family' ? '🎉' : '🎄'}
+                      {quizEdition === 'adult'
+                        ? '🎤'
+                        : quizEdition === 'family'
+                        ? '🎉'
+                        : quizEdition === 'senior'
+                        ? '👵'
+                        : '🎄'}
                     </div>
                     <h2 className="font-heading font-black text-3xl text-white">
-                      Velkommen til Quizen!
+                      {quizEdition === 'senior'
+                        ? 'Velkommen til Senior Grenland Quiz (Musikk & Lokalquiz)!'
+                        : 'Velkommen til Quizen!'}
                     </h2>
                     <p className="text-base text-slate-200 max-w-xl mx-auto">
                       {visibleCodeOnScreen ? (
@@ -757,12 +848,38 @@ export const TvProjectorScreen: React.FC<TvProjectorScreenProps> = ({
 
                     <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-bold">
                       <span className="text-amber-300 uppercase tracking-wider">
-                        {publicQuestion.category}
+                        {publicQuestion.category === 'Musikk-gjetting'
+                          ? '🎵 Musikk-gjetting (Lydklipp & Quiz)'
+                          : publicQuestion.category}
                       </span>
                       {publicQuestion.questionType === 'open_text' && (
                         <span className="text-fuchsia-300">✍️ Skriv-svar (AhaSlides)</span>
                       )}
                     </div>
+
+                    {publicQuestion.musicSongId && (() => {
+                      const revealedSong =
+                        quizPhase === 'reveal'
+                          ? MUSIC_BINGO_SONGS.find((s) => s.id === publicQuestion.musicSongId)
+                          : null;
+                      return (
+                        <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-amber-500/20 via-emerald-500/15 to-amber-500/20 border-2 border-amber-400/60 flex items-center gap-3">
+                          <span className="text-3xl shrink-0">🔊</span>
+                          <div>
+                            <div className="text-xs sm:text-sm font-black text-amber-200 uppercase tracking-wider">
+                              {quizPhase === 'reveal' && revealedSong
+                                ? `🎶 Låten var: «${revealedSong.title}» — ${revealedSong.artist} (${revealedSong.decade})`
+                                : '🎵 LYDSPØRSMÅL · Lytt til melodien & les spørsmålet under!'}
+                            </div>
+                            {publicQuestion.musicHint && (
+                              <div className="text-sm sm:text-base text-amber-100/90 font-semibold mt-0.5">
+                                💡 Hint: {publicQuestion.musicHint}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })()}
 
                     <h2 className="font-heading font-black text-2xl sm:text-4xl text-white leading-snug">
                       {publicQuestion.question}
@@ -893,7 +1010,13 @@ export const TvProjectorScreen: React.FC<TvProjectorScreenProps> = ({
             )}
 
             {/* Team Live Scoreboard Footer */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-3 border-t border-white/10">
+            <div
+              className={`grid gap-3 pt-3 border-t border-white/10 ${
+                quizTeams.length > 6
+                  ? 'grid-cols-2 sm:grid-cols-4 lg:grid-cols-6'
+                  : 'grid-cols-2 sm:grid-cols-4'
+              }`}
+            >
               {quizTeams.map((team) => {
                 const style = TEAM_STYLE[team.color];
                 const answered = quizSnapshot?.answeredTeamIds?.includes(team.id);

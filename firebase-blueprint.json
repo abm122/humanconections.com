@@ -169,7 +169,7 @@
         "activeGame": { "type": "string", "enum": ["bingo", "quiz"] },
         "hasBingo": { "type": "boolean" },
         "hasQuiz": { "type": "boolean" },
-        "edition": { "type": "string", "enum": ["adult", "family", "christmas"] },
+        "edition": { "type": "string", "enum": ["adult", "family", "christmas", "senior"] },
         "calledBallNumbers": { "type": "array", "description": "Drawn ball numbers 1-75" },
         "playersSummary": { "type": "array", "description": "Public Bingo player standings summary" },
         "quizState": { "type": "object", "description": "Public phase-gated Quiz snapshot for cross-instance sync" },
