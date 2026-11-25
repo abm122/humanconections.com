@@ -4050,6 +4050,25 @@ app.get(['/api/health', '/healthz'], (_req, res) => {
   });
 });
 
+app.get('/robots.txt', (_req, res) => {
+  res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+  res.send('User-agent: *\nAllow: /\n\nSitemap: https://humanconections.com/sitemap.xml\n');
+});
+
+app.get('/sitemap.xml', (_req, res) => {
+  res.setHeader('Content-Type', 'application/xml; charset=utf-8');
+  res.send(
+    '<?xml version="1.0" encoding="UTF-8"?>\n' +
+      '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n' +
+      '  <url>\n' +
+      '    <loc>https://humanconections.com/</loc>\n' +
+      '    <changefreq>weekly</changefreq>\n' +
+      '    <priority>1.0</priority>\n' +
+      '  </url>\n' +
+      '</urlset>\n'
+  );
+});
+
 // Vite middleware in dev or static files in production
 async function startServer() {
   const args = process.argv.slice(2);
