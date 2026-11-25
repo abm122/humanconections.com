@@ -1,7 +1,8 @@
 {
-  "name": "Human-connection — Enjoy Bingo · Enjoy Together",
+  "name": "Human-connection — Digital Quiz & Sosialt Fellesskap",
   "short_name": "Human-connection",
-  "description": "Human-connection — Enjoy Bingo · Enjoy Together. Familievennlig bingo, quiz, mimelek og memory for arrangementer og fellesskap.",
+  "description": "Familievennlig digital quiz i Kahoot-stil, musikkquiz, memory og sosial bingo for skoler, eldre og foreninger. Ingen pengespill.",
+  "categories": ["education", "social", "entertainment"],
   "start_url": "/",
   "display": "standalone",
   "orientation": "any",
