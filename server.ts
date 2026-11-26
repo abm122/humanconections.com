@@ -3788,8 +3788,8 @@ app.get('/api/stripe/status', (_req, res) => {
 // Update Stripe Keys (from Owner Control Modal)
 app.post('/api/stripe/update-keys', (req, res) => {
   const { secretKey, publishableKey, ownerToken } = req.body || {};
-  if (ownerToken !== undefined && !isValidOwnerToken(ownerToken)) {
-    return res.status(403).json({ success: false, error: 'Ugyldig eier-sesjon.' });
+  if (!isValidOwnerToken(ownerToken)) {
+    return res.status(403).json({ success: false, error: 'Ugyldig eller manglende eier-sesjon.' });
   }
   if (typeof secretKey === 'string') {
     const trimmed = secretKey.trim();

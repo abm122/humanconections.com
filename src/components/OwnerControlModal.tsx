@@ -170,8 +170,11 @@ export const OwnerControlModal: React.FC<OwnerControlModalProps> = ({
         }),
       });
       const data = await res.json();
+      if (!res.ok || !data?.success) {
+        throw new Error(data?.error || 'Kunne ikke oppdatere Stripe-nøkler på serveren.');
+      }
       monetization.updateSettings({
-        stripeSecretKey: stripeSecretKeyInput.trim(),
+        stripeSecretKey: '',
         stripePublishableKey: stripePublishableKeyInput.trim(),
       });
       setStripeGatewayStatus(data);
