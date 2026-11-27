@@ -128,7 +128,7 @@ class RemoteBingoService {
   constructor() {
     if (typeof window !== 'undefined') {
       // Gjenopprett lagret kode kun dersom arrangør/eier allerede har gyldig tilgang; ikke slett fra localStorage før async Firebase-auth rekker å laste
-      if (sessionTimer.hasFullPaidAccess() || this.canActAsHost()) {
+      if (sessionTimer.hasPaidAccess() || this.canActAsHost()) {
         const savedHost = localStorage.getItem(STORAGE_KEY_HOST_CODE);
         if (savedHost && savedHost.length >= 3) {
           this.hostCode = savedHost;
@@ -156,7 +156,7 @@ class RemoteBingoService {
       }
 
       sessionTimer.subscribe(() => {
-        if (!sessionTimer.hasFullPaidAccess() && !this.isRemotePlayer && !this.canActAsHost()) {
+        if (!sessionTimer.hasPaidAccess() && !this.isRemotePlayer && !this.canActAsHost()) {
           if (this.hostCode || this.isHost) {
             this.clearPaidHostCode();
           }
@@ -184,7 +184,7 @@ class RemoteBingoService {
       return true;
     }
     const user = authService.getCurrentUser();
-    return Boolean(user.isAuthenticated && sessionTimer.hasFullPaidAccess());
+    return Boolean(user.isAuthenticated && sessionTimer.hasPaidAccess());
   }
 
   public getHostKeyForService(): string {

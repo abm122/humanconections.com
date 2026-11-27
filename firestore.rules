@@ -90,6 +90,30 @@ service cloud.firestore {
         s.showLiveDrum is bool;
     }
 
+    function isValidLayoutPrefs(l) {
+      return l is map &&
+        l.keys().hasAll([
+          'swapColumns', 'leftSectionOrder', 'rightSectionOrder', 'collapsedSections',
+          'quizSwapColumns', 'quizDefaultSize', 'quizDefaultDock', 'quizCollapsedPanels'
+        ]) &&
+        l.keys().hasOnly([
+          'swapColumns', 'leftSectionOrder', 'rightSectionOrder', 'collapsedSections',
+          'quizSwapColumns', 'quizDefaultSize', 'quizDefaultDock', 'quizCollapsedPanels'
+        ]) &&
+        l.swapColumns is bool &&
+        l.leftSectionOrder is list && l.leftSectionOrder.size() <= 12 &&
+        (l.leftSectionOrder.size() == 0 || (l.leftSectionOrder[0] is string && l.leftSectionOrder[0].size() <= 40)) &&
+        l.rightSectionOrder is list && l.rightSectionOrder.size() <= 12 &&
+        (l.rightSectionOrder.size() == 0 || (l.rightSectionOrder[0] is string && l.rightSectionOrder[0].size() <= 40)) &&
+        l.collapsedSections is list && l.collapsedSections.size() <= 12 &&
+        (l.collapsedSections.size() == 0 || (l.collapsedSections[0] is string && l.collapsedSections[0].size() <= 40)) &&
+        l.quizSwapColumns is bool &&
+        l.quizDefaultSize in ['compact', 'standard', 'expanded'] &&
+        l.quizDefaultDock in ['center', 'left', 'right', 'top_left', 'top_right'] &&
+        l.quizCollapsedPanels is list && l.quizCollapsedPanels.size() <= 12 &&
+        (l.quizCollapsedPanels.size() == 0 || (l.quizCollapsedPanels[0] is string && l.quizCollapsedPanels[0].size() <= 40));
+    }
+
     function isValidPublicAppConfig(data) {
       return data.keys().hasAll([
         'appTitle', 'appSubtitle', 'customWinnerTaskLine1', 'customWinnerTaskLine2',
@@ -102,6 +126,7 @@ service cloud.firestore {
       data.keys().hasOnly([
         'appTitle', 'appSubtitle', 'customWinnerTaskLine1', 'customWinnerTaskLine2',
         'customWinnerTaskBingo', 'categoryOrder', 'visibleModules', 'startPanelDefaults',
+        'layoutPrefs',
         'isMonetizationActive', 'commissionPercent', 'fixedFeePerPlayer',
         'eventPassPrice', 'proBigScreenPrice', 'eventExtensionPrice',
         'price20MinTrial', 'price1Hour', 'price2Hours', 'price3Hours',
@@ -116,6 +141,7 @@ service cloud.firestore {
       data.categoryOrder[0] is string && data.categoryOrder[0].size() <= 40 &&
       isValidVisibleModules(data.visibleModules) &&
       (!('startPanelDefaults' in data) || isValidStartPanelDefaults(data.startPanelDefaults)) &&
+      (!('layoutPrefs' in data) || isValidLayoutPrefs(data.layoutPrefs)) &&
       data.isMonetizationActive is bool &&
       isNonNegNumber(data.commissionPercent) &&
       isNonNegNumber(data.fixedFeePerPlayer) &&
@@ -223,6 +249,7 @@ service cloud.firestore {
         incoming().diff(existing()).affectedKeys().hasOnly([
           'appTitle', 'appSubtitle', 'customWinnerTaskLine1', 'customWinnerTaskLine2',
           'customWinnerTaskBingo', 'categoryOrder', 'visibleModules', 'startPanelDefaults',
+          'layoutPrefs',
           'isMonetizationActive', 'commissionPercent', 'fixedFeePerPlayer',
           'eventPassPrice', 'proBigScreenPrice', 'eventExtensionPrice',
           'price20MinTrial', 'price1Hour', 'price2Hours', 'price3Hours',

@@ -402,7 +402,7 @@ export default function App() {
       setIsAuthOpen(true);
       return;
     }
-    if (!isOwner && !sessionTimer.hasFullPaidAccess()) {
+    if (!isOwner && !sessionTimer.hasPaidAccess()) {
       sounds.playClick();
       setIsVippsModalOpen(true);
       return;
@@ -424,7 +424,7 @@ export default function App() {
         setIsAuthOpen(true);
         return;
       }
-      if (!sessionTimer.hasFullPaidAccess()) {
+      if (!sessionTimer.hasPaidAccess()) {
         sounds.playClick();
         setIsVippsModalOpen(true);
         return;
@@ -444,7 +444,7 @@ export default function App() {
       setIsAuthOpen(true);
       return;
     }
-    if (!isOwner && !sessionTimer.hasFullPaidAccess()) {
+    if (!isOwner && !sessionTimer.hasPaidAccess()) {
       sounds.playClick();
       setIsVippsModalOpen(true);
       return;
@@ -493,7 +493,7 @@ export default function App() {
       return;
     }
 
-    if (!remoteBingo.getIsRemotePlayer() && sessionTimer.hasFullPaidAccess()) {
+    if (!remoteBingo.getIsRemotePlayer() && sessionTimer.hasPaidAccess()) {
       remoteBingo.activateHostSession(undefined, user.name);
     }
 
@@ -744,11 +744,14 @@ export default function App() {
 
       const remainingMs = sessionTimer.getRemainingMs();
 
-      // Advarsel før spilletiden er over (5 minutter og 1 minutt)
+      const isTrialNow = sessionTimer.isTrialSession();
+      const warningThresholdMs = isTrialNow ? 2 * 60 * 1000 : 5 * 60 * 1000;
+
+      // Advarsel før spilletiden er over (5 min for pakker / 2 min for 10-min prøve, pluss 1 minutt)
       if (!sessionTimer.isExpired() && sessionTimer.hasPaidAccess() && !remoteBingo.getIsRemotePlayer()) {
         if (remainingMs <= 60 * 1000 && remainingMs > 0) {
           setTimeWarningNotice(`🚨 Siste minutt! Spillet avsluttes og vert/spiller logges automatisk ut om ${Math.ceil(remainingMs / 1000)}s.`);
-        } else if (remainingMs <= 5 * 60 * 1000 && remainingMs > 0) {
+        } else if (remainingMs <= warningThresholdMs && remainingMs > 0) {
           setTimeWarningNotice(`⚠️ Kun ${sessionTimer.getFormattedRemaining()} igjen av spilletiden! Verten og spillere logges automatisk ut ved 00:00.`);
         } else {
           setTimeWarningNotice(null);
@@ -757,7 +760,7 @@ export default function App() {
         setTimeWarningNotice(null);
       }
 
-      // Automatisk utlogging når betalt pakketid har løpt ut til 00:00:00
+      // Automatisk utlogging når betalt/prøve pakketid har løpt ut til 00:00:00
       if (sessionTimer.hasTimedOut()) {
         setTimeWarningNotice(null);
         if (!timeoutHandledRef.current) {
@@ -772,6 +775,7 @@ export default function App() {
             remoteBingo.leaveRemoteSession();
           }
           setIsQuizModalOpen(false);
+          setIsMemoryModalOpen(false);
           setIsRemoteBingoOpen(false);
           setIsAudienceOpen(false);
           setIsGameSelectorOpen(false);
@@ -1103,7 +1107,7 @@ export default function App() {
     if (tvModeConfig?.active) return;
     if (isRemoteParticipant) return;
     const hasFullPaidOrOwner =
-      isOwnerActive || (authUser.isAuthenticated && sessionTimer.hasFullPaidAccess());
+      isOwnerActive || (authUser.isAuthenticated && sessionTimer.hasPaidAccess());
     if (!hasFullPaidOrOwner) return;
 
     const hostProfileName =
@@ -1287,7 +1291,7 @@ export default function App() {
       return;
     }
 
-    if (!remoteBingo.getIsRemotePlayer() && sessionTimer.hasFullPaidAccess()) {
+    if (!remoteBingo.getIsRemotePlayer() && sessionTimer.hasPaidAccess()) {
       remoteBingo.activateHostSession(undefined, user.name);
     }
 
@@ -1365,7 +1369,7 @@ export default function App() {
       setIsOwnerControlOpen(true);
       return;
     }
-    if (!sessionTimer.hasFullPaidAccess()) {
+    if (!sessionTimer.hasPaidAccess()) {
       setIsVippsModalOpen(true);
     } else {
       setIsGameSelectorOpen(true);

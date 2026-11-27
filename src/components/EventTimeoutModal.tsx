@@ -60,14 +60,14 @@ export const EventTimeoutModal: React.FC<EventTimeoutModalProps> = ({
             {isTrialFinished ? '🎮' : '⏱️'}
           </div>
           <h2 className="font-heading font-black text-2xl text-amber-200">
-            {isTrialFinished ? '5 minutter gratis prøvespill er fullført!' : 'Pakketiden er utløpt'}
+            {isTrialFinished ? '10 minutter gratis prøvespill er fullført!' : 'Pakketiden er utløpt'}
           </h2>
           <span className="px-3 py-0.5 rounded-full text-xs font-bold mt-1 bg-rose-500/30 text-rose-200">
             Automatisk utlogging utført
           </span>
           <p className="text-xs text-amber-100/90 mt-2 max-w-md leading-relaxed">
             {isTrialFinished
-              ? 'Håper du likte opplevelsen og bingotrommelen! Prøvetiden er brukt opp og nå skjult. Logg inn på nytt og kjøp spilletid med Visa, Mastercard, Apple Pay eller Google Pay for å åpne alle 4 spill og generere koblingskode.'
+              ? 'Håper du likte å prøve alle spillene! De 10 minuttene med gratis prøvespill er brukt opp og nå skjult. Logg inn på nytt og kjøp spilletid med Visa, Mastercard, Apple Pay eller Google Pay for å fortsette med ubegrensede runder og koblingskode.'
               : 'Den betalte spilletiden for arrangementet er over, og du er logget ut automatisk. For å spille videre i Bingo eller Quiz må du logge inn på nytt og betale en ny spilletidspakke med Visa, Mastercard, Apple Pay eller Google Pay.'}
           </p>
         </div>

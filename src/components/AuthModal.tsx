@@ -43,7 +43,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [playerColor, setPlayerColor] = useState('#059669');
 
   const [toastMessage, setToastMessage] = useState<string | null>(null);
-  const [hasPaid, setHasPaid] = useState<boolean>(() => sessionTimer.hasFullPaidAccess());
+  const [hasPaid, setHasPaid] = useState<boolean>(() => sessionTimer.hasPaidAccess());
   const [sessionRemaining, setSessionRemaining] = useState<string>(() => sessionTimer.getFormattedRemaining());
   const [maskPrivateProfile, setMaskPrivateProfile] = useState<boolean>(false);
 
@@ -52,7 +52,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       setCurrentUser(authService.getCurrentUser());
     });
     const unsubSession = sessionTimer.subscribe(() => {
-      setHasPaid(sessionTimer.hasFullPaidAccess());
+      setHasPaid(sessionTimer.hasPaidAccess());
       setSessionRemaining(sessionTimer.getFormattedRemaining());
     });
     return () => {
@@ -63,7 +63,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
   useEffect(() => {
     if (isOpen) {
-      setHasPaid(sessionTimer.hasFullPaidAccess());
+      setHasPaid(sessionTimer.hasPaidAccess());
       setSessionRemaining(sessionTimer.getFormattedRemaining());
       const u = authService.getCurrentUser();
       if (u.isAuthenticated && u.name && u.name !== 'Gjest') {
@@ -99,7 +99,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     const user = authService.loginAsHost(hostName, hostEmail);
     remoteBingo.setHostName(user.name);
     if (onLoginSuccess) onLoginSuccess(user);
-    if (!sessionTimer.hasFullPaidAccess()) {
+    if (!sessionTimer.hasPaidAccess()) {
       showToast(`Velkommen, ${user.name}! Betaling (Kort / Apple Pay) kreves for å starte spillet.`);
       setTimeout(() => {
         onClose();
@@ -117,7 +117,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     sounds.playLineComplete();
     const user = authService.loginAsPlayer(playerName, playerAvatar, playerColor);
     if (onLoginSuccess) onLoginSuccess(user);
-    if (!sessionTimer.hasFullPaidAccess()) {
+    if (!sessionTimer.hasPaidAccess()) {
       showToast(`Velkommen til Injoy Together, ${user.name}! Arrangementspass kreves for vert på egen enhet.`);
       setTimeout(() => {
         onClose();

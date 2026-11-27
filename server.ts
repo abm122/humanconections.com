@@ -2984,6 +2984,16 @@ interface PersistedOwnerConfig {
       defaultPlayerCount: number;
       showLiveDrum: boolean;
     };
+    layoutPrefs?: {
+      swapColumns: boolean;
+      leftSectionOrder: string[];
+      rightSectionOrder: string[];
+      collapsedSections: string[];
+      quizSwapColumns: boolean;
+      quizDefaultSize: 'compact' | 'standard' | 'expanded';
+      quizDefaultDock: 'center' | 'left' | 'right' | 'top_left' | 'top_right';
+      quizCollapsedPanels: string[];
+    };
     visibleModules: {
       showBigScreen: boolean;
       showMixer: boolean;
@@ -3044,6 +3054,25 @@ const DEFAULT_OWNER_CONFIG: PersistedOwnerConfig = {
       defaultScreenDevice: 'desktop',
       defaultPlayerCount: 2,
       showLiveDrum: true,
+    },
+    layoutPrefs: {
+      swapColumns: false,
+      leftSectionOrder: ['hero', 'host_code', 'kahoot_join', 'drum'],
+      rightSectionOrder: [
+        'status_banner',
+        'category',
+        'mode',
+        'card_format',
+        'players',
+        'cards_screen',
+        'remote_strip',
+        'start_actions',
+      ],
+      collapsedSections: [],
+      quizSwapColumns: false,
+      quizDefaultSize: 'standard',
+      quizDefaultDock: 'center',
+      quizCollapsedPanels: [],
     },
     visibleModules: {
       showBigScreen: true,
@@ -3206,6 +3235,15 @@ function applyPublicConfigToServer(decoded: Record<string, any>) {
           },
         }
       : {}),
+    ...(decoded.layoutPrefs && typeof decoded.layoutPrefs === 'object'
+      ? {
+          layoutPrefs: {
+            ...DEFAULT_OWNER_CONFIG.profile.layoutPrefs!,
+            ...curP.layoutPrefs,
+            ...decoded.layoutPrefs,
+          },
+        }
+      : {}),
     visibleModules: {
       ...curP.visibleModules,
       ...(decoded.visibleModules && typeof decoded.visibleModules === 'object' ? decoded.visibleModules : {}),
@@ -3324,6 +3362,7 @@ function getPublicOwnerSnapshot() {
       customWinnerTaskBingo: persistedOwnerConfig.profile.customWinnerTaskBingo,
       categoryOrder: persistedOwnerConfig.profile.categoryOrder,
       startPanelDefaults: persistedOwnerConfig.profile.startPanelDefaults || DEFAULT_OWNER_CONFIG.profile.startPanelDefaults,
+      layoutPrefs: persistedOwnerConfig.profile.layoutPrefs || DEFAULT_OWNER_CONFIG.profile.layoutPrefs,
       visibleModules: persistedOwnerConfig.profile.visibleModules,
     },
     pricingSettings: {
@@ -3523,6 +3562,15 @@ app.post('/api/owner/update-config', (req, res) => {
               ...DEFAULT_OWNER_CONFIG.profile.startPanelDefaults!,
               ...persistedOwnerConfig.profile.startPanelDefaults,
               ...(p.startPanelDefaults as any),
+            },
+          }
+        : {}),
+      ...(p.layoutPrefs && typeof p.layoutPrefs === 'object'
+        ? {
+            layoutPrefs: {
+              ...DEFAULT_OWNER_CONFIG.profile.layoutPrefs!,
+              ...persistedOwnerConfig.profile.layoutPrefs,
+              ...(p.layoutPrefs as any),
             },
           }
         : {}),

@@ -34,6 +34,17 @@ export interface StartPanelDefaults {
   showLiveDrum: boolean;
 }
 
+export interface OwnerLayoutPrefs {
+  swapColumns: boolean;
+  leftSectionOrder: string[];
+  rightSectionOrder: string[];
+  collapsedSections: string[];
+  quizSwapColumns: boolean;
+  quizDefaultSize: 'compact' | 'standard' | 'expanded';
+  quizDefaultDock: 'center' | 'left' | 'right' | 'top_left' | 'top_right';
+  quizCollapsedPanels: string[];
+}
+
 export interface OwnerProfile {
   name: string;
   email: string;
@@ -49,6 +60,7 @@ export interface OwnerProfile {
   customWinnerTaskBingo: string;
   categoryOrder?: BingoTheme[]; // Eierens favoritt-rekkefølge for kategorier
   startPanelDefaults?: StartPanelDefaults;
+  layoutPrefs?: OwnerLayoutPrefs;
   visibleModules: {
     showBigScreen: boolean;
     showMixer: boolean;
@@ -100,6 +112,26 @@ export const DEFAULT_START_PANEL_DEFAULTS: StartPanelDefaults = {
   showLiveDrum: true,
 };
 
+export const DEFAULT_LAYOUT_PREFS: OwnerLayoutPrefs = {
+  swapColumns: false,
+  leftSectionOrder: ['hero', 'host_code', 'kahoot_join', 'drum'],
+  rightSectionOrder: [
+    'status_banner',
+    'category',
+    'mode',
+    'card_format',
+    'players',
+    'cards_screen',
+    'remote_strip',
+    'start_actions',
+  ],
+  collapsedSections: [],
+  quizSwapColumns: false,
+  quizDefaultSize: 'standard',
+  quizDefaultDock: 'center',
+  quizCollapsedPanels: [],
+};
+
 const DEFAULT_PROFILE: OwnerProfile = {
   name: 'Eier & Admin',
   email: 'adhanom3@gmail.com',
@@ -115,6 +147,7 @@ const DEFAULT_PROFILE: OwnerProfile = {
   customWinnerTaskBingo: 'KRONING: Reis deg, rop et rungende BINGO og del ut en varm klem og seierssmil!',
   categoryOrder: DEFAULT_CATEGORY_ORDER,
   startPanelDefaults: DEFAULT_START_PANEL_DEFAULTS,
+  layoutPrefs: DEFAULT_LAYOUT_PREFS,
   visibleModules: {
     showBigScreen: true,
     showMixer: true,
@@ -248,6 +281,12 @@ class OwnerControlService {
             ...cfg.startPanelDefaults,
           }
         : this.profile.startPanelDefaults,
+      layoutPrefs: cfg.layoutPrefs
+        ? {
+            ...DEFAULT_LAYOUT_PREFS,
+            ...cfg.layoutPrefs,
+          }
+        : this.profile.layoutPrefs,
       visibleModules: cfg.visibleModules,
     });
     monetization.applyServerSettings({
@@ -425,6 +464,7 @@ class OwnerControlService {
             customWinnerTaskBingo: this.profile.customWinnerTaskBingo,
             categoryOrder: this.profile.categoryOrder,
             startPanelDefaults: this.profile.startPanelDefaults || DEFAULT_START_PANEL_DEFAULTS,
+            layoutPrefs: this.profile.layoutPrefs || DEFAULT_LAYOUT_PREFS,
             visibleModules: this.profile.visibleModules,
             isMonetizationActive: m.isMonetizationActive,
             commissionPercent: m.commissionPercent,
@@ -517,6 +557,13 @@ class OwnerControlService {
             ...partial.startPanelDefaults,
           }
         : this.profile.startPanelDefaults || DEFAULT_START_PANEL_DEFAULTS,
+      layoutPrefs: partial.layoutPrefs
+        ? {
+            ...DEFAULT_LAYOUT_PREFS,
+            ...(this.profile.layoutPrefs || {}),
+            ...partial.layoutPrefs,
+          }
+        : this.profile.layoutPrefs || DEFAULT_LAYOUT_PREFS,
       categoryOrder: Array.isArray(partial.categoryOrder) && partial.categoryOrder.length > 0
         ? (partial.categoryOrder as BingoTheme[])
         : this.profile.categoryOrder,
@@ -569,6 +616,10 @@ class OwnerControlService {
           startPanelDefaults: {
             ...DEFAULT_START_PANEL_DEFAULTS,
             ...(parsed.startPanelDefaults || {}),
+          },
+          layoutPrefs: {
+            ...DEFAULT_LAYOUT_PREFS,
+            ...(parsed.layoutPrefs || {}),
           },
         };
       }

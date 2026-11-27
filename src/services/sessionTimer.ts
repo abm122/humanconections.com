@@ -12,8 +12,8 @@ export interface SessionInfo {
   isExtended: boolean;
   extendedByMinutes: number;
   hasPaidAccess: boolean; // Krever betaling for at spillere/vert kan starte
-  isTrial?: boolean; // 5 minutters gratis prøvespill for nye spillere
-  packageLabel?: string; // F.eks. "20 min prøvetid", "1 time", "2 timer"
+  isTrial?: boolean; // 10 minutters gratis prøvespill på alle spill for nye brukere
+  packageLabel?: string; // F.eks. "10 min prøvespill", "20 min prøvetid", "1 time", "2 timer"
   lastRenewalTime?: number;
   isPaused?: boolean;
   pausedAt?: number;
@@ -276,7 +276,7 @@ class SessionTimerService {
   }
 
   /**
-   * True når bruker har aktiv betaling ELLER aktiv 5-min prøvetid (ikke for fjern-deltakere med kode).
+   * True når bruker har aktiv betaling ELLER aktiv 10-min prøvetid (ikke for fjern-deltakere med kode).
    */
   public hasPaidAccess(): boolean {
     if (ownerControl.isUnlocked()) {
@@ -290,8 +290,7 @@ class SessionTimerService {
   }
 
   /**
-   * True KUN når bruker har kjøpt en betalt pakke (eller er Eier) — IKKE for 5-min prøvespill og IKKE for deltakere med kode.
-   * Kreves for å generere og vise koblingskode (Bingo & Quiz).
+   * True KUN når bruker har kjøpt en betalt pakke (eller er Eier) — IKKE for 10-min prøvespill og IKKE for deltakere med kode.
    */
   public hasFullPaidAccess(): boolean {
     if (ownerControl.isUnlocked()) {
@@ -430,7 +429,7 @@ class SessionTimerService {
     return true;
   }
 
-  public activateTrialSession(minutes: number = 5): boolean {
+  public activateTrialSession(minutes: number = 10): boolean {
     if (this.hasUsedTrial() || this.hasFullPaidAccess()) {
       return false;
     }

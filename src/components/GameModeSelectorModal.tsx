@@ -68,11 +68,14 @@ export const GameModeSelectorModal: React.FC<GameModeSelectorModalProps> = ({
             <div className="min-w-0">
               <div className="flex items-center gap-2">
                 <h3 className="font-heading font-black text-base sm:text-xl text-white tracking-wide">
-                  Velg Spill for Arrangementet (6 Valgalternativer)
+                  Velg Spill for Arrangementet (Alle Spill)
                 </h3>
               </div>
               <p className="text-2xs sm:text-xs text-amber-200/80 mt-0.5">
-                Innlogget som <strong>{currentUser.name || 'Arrangør'}</strong> · Én betaling gir fri veksling mellom alle spill!
+                Innlogget som <strong>{currentUser.name || 'Arrangør'}</strong> ·{' '}
+                {sessionTimer.isTrialSession()
+                  ? '10 minutters gratis prøvetid gir fri veksling mellom alle spillene!'
+                  : 'Én betaling gir fri veksling mellom alle spill!'}
               </p>
             </div>
           </div>
@@ -111,7 +114,9 @@ export const GameModeSelectorModal: React.FC<GameModeSelectorModalProps> = ({
           {/* Active Spilletid Status Strip */}
           <div className="p-3.5 rounded-2xl bg-gradient-to-r from-emerald-950/80 via-black/60 to-emerald-950/80 border border-emerald-500/40 flex flex-wrap items-center justify-between gap-2">
             <div className="text-xs sm:text-sm font-bold text-emerald-200">
-              Aktiv spilletid gjelder for alle 6 spillene:
+              {sessionTimer.isTrialSession()
+                ? '10 min gratis prøvetid gjelder for alle spillene:'
+                : 'Aktiv spilletid gjelder for alle spillene:'}
             </div>
             <div className="font-mono tabular-nums font-black text-base sm:text-lg text-emerald-300">
               {sessionRemaining}
@@ -119,7 +124,7 @@ export const GameModeSelectorModal: React.FC<GameModeSelectorModalProps> = ({
           </div>
 
           <div className="text-xs font-bold text-amber-300">
-            Velg spill (du kan gå fritt frem og tilbake innenfor betalt tid):
+            Velg spill (du kan gå fritt frem og tilbake mellom alle spillene innenfor aktiv tid):
           </div>
 
           {/* 6 Main Game Choices + Classic Table (1-col Mobile, 2-col PC/TV) */}
@@ -378,10 +383,12 @@ export const GameModeSelectorModal: React.FC<GameModeSelectorModalProps> = ({
           {/* Peace of Mind Reassurance Box */}
           <div className="p-3.5 rounded-2xl bg-black/60 border border-amber-500/30 text-2xs text-amber-200/90 leading-relaxed space-y-1">
             <div className="font-bold text-amber-300">
-              💡 Én betaling dekker alle 6 spillene!
+              {sessionTimer.isTrialSession()
+                ? '🎮 10 minutters gratis prøvetid dekker alle spillene!'
+                : '💡 Én betaling dekker alle spillene!'}
             </div>
             <p>
-              Man betaler én pakke og går fritt frem og tilbake mellom <strong>Storskjerm Bingo</strong>, <strong>Avstandsbingo</strong>, <strong>QUIZ</strong>, <strong>Familie- & Barnequiz</strong>, <strong>JuleQuiz</strong> og <strong>Memory</strong> innenfor samme aktive spilletid ({sessionRemaining}).
+              Du kan gå fritt frem og tilbake mellom <strong>Storskjerm &amp; Musikkbingo</strong>, <strong>Avstandsbingo</strong>, <strong>QUIZ</strong>, <strong>Familie- &amp; Barnequiz</strong>, <strong>JuleQuiz &amp; Mimelek</strong>, <strong>Memory</strong>, <strong>Senior Grenland Quiz</strong> og <strong>Bordspill</strong> innenfor samme aktive spilletid ({sessionRemaining}).
             </p>
           </div>
         </div>
@@ -389,7 +396,9 @@ export const GameModeSelectorModal: React.FC<GameModeSelectorModalProps> = ({
         {/* Footer */}
         <div className="p-3 bg-black/60 border-t border-amber-500/20 text-center text-2xs text-amber-300/60 flex items-center justify-between px-5">
           <span>Human-connection · Enjoy Bingo · Enjoy Together</span>
-          <span className="text-emerald-400 font-mono">1 Betaling · Alle 6 Spill</span>
+          <span className="text-emerald-400 font-mono">
+            {sessionTimer.isTrialSession() ? '10 min prøve · Alle spill' : '1 Betaling · Alle spill'}
+          </span>
         </div>
       </div>
     </div>

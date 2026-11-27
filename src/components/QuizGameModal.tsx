@@ -8,7 +8,7 @@ import { sounds } from '../audio/soundEngine';
 import { authService } from '../services/authService';
 import { sessionTimer } from '../services/sessionTimer';
 import { remoteBingo } from '../services/remoteBingo';
-import { ownerControl } from '../services/ownerControl';
+import { DEFAULT_LAYOUT_PREFS, OwnerLayoutPrefs, ownerControl } from '../services/ownerControl';
 import { MUSIC_BINGO_SONGS } from '../data/musicBingoSongs';
 import { musicClipPlayer, MusicClipPlayerState } from '../services/musicClipPlayer';
 import {
@@ -102,7 +102,7 @@ export const QuizGameModal: React.FC<QuizGameModalProps> = ({
   const [sessionRemaining, setSessionRemaining] = useState<string>(() =>
     sessionTimer.getFormattedRemaining()
   );
-  const [hasFullPaid, setHasFullPaid] = useState<boolean>(() => sessionTimer.hasFullPaidAccess());
+  const [hasFullPaid, setHasFullPaid] = useState<boolean>(() => sessionTimer.hasPaidAccess());
   const [isJoining, setIsJoining] = useState<boolean>(false);
 
   // Host state
@@ -165,6 +165,276 @@ export const QuizGameModal: React.FC<QuizGameModalProps> = ({
   const quizAudioFileInputRef = useRef<HTMLInputElement | null>(null);
   const pendingAudioSongIdRef = useRef<string | null>(null);
 
+  // Dashboard window move / compress / expand / card layout customization
+  const QUIZ_PREFS_STORAGE_KEY = 'joybingo_quiz_dashboard_prefs_v1';
+  const DEFAULT_LEFT_CARDS = ['code_bar', 'activity_bar', 'question_card'];
+  const DEFAULT_RIGHT_CARDS = ['leaderboard', 'teams', 'tips'];
+
+  const readStoredQuizPrefs = () => {
+    const ownerLayout = ownerControl.getProfile().layoutPrefs || DEFAULT_LAYOUT_PREFS;
+    const fallback = {
+      windowSize: ownerLayout.quizDefaultSize || 'standard',
+      dockMode: ownerLayout.quizDefaultDock || 'center',
+      hostSplitMode: '60_40' as '60_40' | '50_50' | 'stacked',
+      swapHostColumns: Boolean(ownerLayout.quizSwapColumns),
+      leftCards: [...DEFAULT_LEFT_CARDS],
+      rightCards: [...DEFAULT_RIGHT_CARDS],
+      collapsedCards: Array.isArray(ownerLayout.quizCollapsedPanels)
+        ? [...ownerLayout.quizCollapsedPanels]
+        : [],
+    };
+    if (typeof window === 'undefined') return fallback;
+    try {
+      const raw = window.localStorage.getItem(QUIZ_PREFS_STORAGE_KEY);
+      if (!raw) return fallback;
+      const parsed = JSON.parse(raw) as Partial<typeof fallback>;
+      const validSizes = ['compact', 'standard', 'expanded'];
+      const validDocks = ['center', 'left', 'right', 'top_left', 'top_right'];
+      const validSplits = ['60_40', '50_50', 'stacked'];
+      const allKnown = new Set([...DEFAULT_LEFT_CARDS, ...DEFAULT_RIGHT_CARDS]);
+      const lc = Array.isArray(parsed.leftCards)
+        ? parsed.leftCards.filter((id) => allKnown.has(id))
+        : fallback.leftCards;
+      const rc = Array.isArray(parsed.rightCards)
+        ? parsed.rightCards.filter((id) => allKnown.has(id) && !lc.includes(id))
+        : fallback.rightCards;
+      // Ensure no card got lost
+      for (const id of [...DEFAULT_LEFT_CARDS, ...DEFAULT_RIGHT_CARDS]) {
+        if (!lc.includes(id) && !rc.includes(id)) {
+          if (DEFAULT_LEFT_CARDS.includes(id)) lc.push(id);
+          else rc.push(id);
+        }
+      }
+      return {
+        windowSize: validSizes.includes(String(parsed.windowSize))
+          ? (parsed.windowSize as 'compact' | 'standard' | 'expanded')
+          : fallback.windowSize,
+        dockMode: validDocks.includes(String(parsed.dockMode))
+          ? (parsed.dockMode as 'center' | 'left' | 'right' | 'top_left' | 'top_right')
+          : fallback.dockMode,
+        hostSplitMode: validSplits.includes(String(parsed.hostSplitMode))
+          ? (parsed.hostSplitMode as '60_40' | '50_50' | 'stacked')
+          : fallback.hostSplitMode,
+        swapHostColumns:
+          typeof parsed.swapHostColumns === 'boolean' ? parsed.swapHostColumns : fallback.swapHostColumns,
+        leftCards: lc,
+        rightCards: rc,
+        collapsedCards: Array.isArray(parsed.collapsedCards)
+          ? parsed.collapsedCards.filter((id) => allKnown.has(id))
+          : fallback.collapsedCards,
+      };
+    } catch {
+      return fallback;
+    }
+  };
+
+  const [windowSize, setWindowSize] = useState<'compact' | 'standard' | 'expanded'>(
+    () => readStoredQuizPrefs().windowSize
+  );
+  const [dockMode, setDockMode] = useState<'center' | 'left' | 'right' | 'top_left' | 'top_right'>(
+    () => readStoredQuizPrefs().dockMode
+  );
+  const [isMinimized, setIsMinimized] = useState<boolean>(false);
+  const [dragPos, setDragPos] = useState<{ x: number; y: number } | null>(null);
+  const [hostSplitMode, setHostSplitMode] = useState<'60_40' | '50_50' | 'stacked'>(
+    () => readStoredQuizPrefs().hostSplitMode
+  );
+  const [swapHostColumns, setSwapHostColumns] = useState<boolean>(
+    () => readStoredQuizPrefs().swapHostColumns
+  );
+  const [leftCards, setLeftCards] = useState<string[]>(() => readStoredQuizPrefs().leftCards);
+  const [rightCards, setRightCards] = useState<string[]>(() => readStoredQuizPrefs().rightCards);
+  const [collapsedCards, setCollapsedCards] = useState<string[]>(
+    () => readStoredQuizPrefs().collapsedCards
+  );
+  const [showLayoutToolbar, setShowLayoutToolbar] = useState<boolean>(false);
+  const [isOwnerUnlocked, setIsOwnerUnlocked] = useState<boolean>(
+    () => authService.getCurrentUser().role === 'owner' || ownerControl.isUnlocked()
+  );
+  const [isSavingGlobalLayout, setIsSavingGlobalLayout] = useState<boolean>(false);
+  const [globalLayoutFeedback, setGlobalLayoutFeedback] = useState<string | null>(null);
+
+  const modalCardRef = useRef<HTMLDivElement | null>(null);
+  const dragSessionRef = useRef<{ offsetX: number; offsetY: number } | null>(null);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      window.localStorage.setItem(
+        QUIZ_PREFS_STORAGE_KEY,
+        JSON.stringify({
+          windowSize,
+          dockMode,
+          hostSplitMode,
+          swapHostColumns,
+          leftCards,
+          rightCards,
+          collapsedCards,
+        })
+      );
+    } catch {
+      // ignore storage errors
+    }
+  }, [windowSize, dockMode, hostSplitMode, swapHostColumns, leftCards, rightCards, collapsedCards]);
+
+  useEffect(() => {
+    const syncOwner = () => {
+      setIsOwnerUnlocked(authService.getCurrentUser().role === 'owner' || ownerControl.isUnlocked());
+    };
+    const unsubA = authService.subscribe(syncOwner);
+    const unsubO = ownerControl.subscribe(syncOwner);
+    return () => {
+      unsubA();
+      unsubO();
+    };
+  }, []);
+
+  useEffect(() => {
+    const handlePointerMove = (e: PointerEvent) => {
+      const sess = dragSessionRef.current;
+      const el = modalCardRef.current;
+      if (!sess || !el || typeof window === 'undefined') return;
+      const rect = el.getBoundingClientRect();
+      const maxX = Math.max(8, window.innerWidth - rect.width - 8);
+      const maxY = Math.max(8, window.innerHeight - 64);
+      const nextX = Math.max(8, Math.min(maxX, e.clientX - sess.offsetX));
+      const nextY = Math.max(8, Math.min(maxY, e.clientY - sess.offsetY));
+      setDragPos({ x: Math.round(nextX), y: Math.round(nextY) });
+    };
+    const handlePointerUp = () => {
+      dragSessionRef.current = null;
+    };
+    const handleWindowResize = () => {
+      setDragPos((prev) => {
+        if (!prev || !modalCardRef.current || typeof window === 'undefined') return prev;
+        const rect = modalCardRef.current.getBoundingClientRect();
+        const maxX = Math.max(8, window.innerWidth - rect.width - 8);
+        const maxY = Math.max(8, window.innerHeight - 64);
+        return {
+          x: Math.max(8, Math.min(maxX, prev.x)),
+          y: Math.max(8, Math.min(maxY, prev.y)),
+        };
+      });
+    };
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', handlePointerUp);
+    window.addEventListener('pointercancel', handlePointerUp);
+    window.addEventListener('resize', handleWindowResize);
+    return () => {
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', handlePointerUp);
+      window.removeEventListener('pointercancel', handlePointerUp);
+      window.removeEventListener('resize', handleWindowResize);
+    };
+  }, []);
+
+  const handleHeaderDragStart = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (windowSize === 'expanded' && !isMinimized) return;
+    const target = e.target as HTMLElement | null;
+    if (target && target.closest('button, input, select, a, textarea')) return;
+    const el = modalCardRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    dragSessionRef.current = {
+      offsetX: e.clientX - rect.left,
+      offsetY: e.clientY - rect.top,
+    };
+  };
+
+  const handleSelectDock = (nextDock: 'center' | 'left' | 'right' | 'top_left' | 'top_right') => {
+    sounds.playClick();
+    setDragPos(null);
+    setDockMode(nextDock);
+    if (nextDock !== 'center' && windowSize === 'expanded') {
+      setWindowSize('compact');
+    }
+  };
+
+  const handleSelectWindowSize = (nextSize: 'compact' | 'standard' | 'expanded') => {
+    sounds.playClick();
+    setIsMinimized(false);
+    setWindowSize(nextSize);
+    if (nextSize === 'expanded') {
+      setDragPos(null);
+      setDockMode('center');
+    } else if (nextSize === 'standard' && dockMode === 'center') {
+      setDragPos(null);
+    }
+  };
+
+  const toggleCardCollapse = (cardId: string) => {
+    sounds.playClick();
+    setCollapsedCards((prev) =>
+      prev.includes(cardId) ? prev.filter((id) => id !== cardId) : [...prev, cardId]
+    );
+  };
+
+  const moveHostCard = (cardId: string, direction: 'up' | 'down' | 'swap') => {
+    sounds.playClick();
+    const inLeft = leftCards.includes(cardId);
+    if (direction === 'swap') {
+      if (inLeft) {
+        setLeftCards((prev) => prev.filter((id) => id !== cardId));
+        setRightCards((prev) => [...prev, cardId]);
+      } else {
+        setRightCards((prev) => prev.filter((id) => id !== cardId));
+        setLeftCards((prev) => [...prev, cardId]);
+      }
+      return;
+    }
+    const setter = inLeft ? setLeftCards : setRightCards;
+    setter((prev) => {
+      const idx = prev.indexOf(cardId);
+      if (idx === -1) return prev;
+      const next = [...prev];
+      if (direction === 'up' && idx > 0) {
+        [next[idx - 1], next[idx]] = [next[idx], next[idx - 1]];
+      } else if (direction === 'down' && idx < next.length - 1) {
+        [next[idx], next[idx + 1]] = [next[idx + 1], next[idx]];
+      }
+      return next;
+    });
+  };
+
+  const resetQuizDashboardLayout = () => {
+    sounds.playClick();
+    const ownerLayout = ownerControl.getProfile().layoutPrefs || DEFAULT_LAYOUT_PREFS;
+    setWindowSize(ownerLayout.quizDefaultSize || 'standard');
+    setDockMode(ownerLayout.quizDefaultDock || 'center');
+    setIsMinimized(false);
+    setDragPos(null);
+    setHostSplitMode('60_40');
+    setSwapHostColumns(Boolean(ownerLayout.quizSwapColumns));
+    setLeftCards([...DEFAULT_LEFT_CARDS]);
+    setRightCards([...DEFAULT_RIGHT_CARDS]);
+    setCollapsedCards(
+      Array.isArray(ownerLayout.quizCollapsedPanels) ? [...ownerLayout.quizCollapsedPanels] : []
+    );
+  };
+
+  const handleSaveQuizLayoutAsGlobalDefault = async () => {
+    if (!isOwnerUnlocked) return;
+    sounds.playClick();
+    setIsSavingGlobalLayout(true);
+    setGlobalLayoutFeedback(null);
+    const currentPrefs: OwnerLayoutPrefs = {
+      ...(ownerControl.getProfile().layoutPrefs || DEFAULT_LAYOUT_PREFS),
+      quizSwapColumns: swapHostColumns,
+      quizDefaultSize: windowSize,
+      quizDefaultDock: dockMode,
+      quizCollapsedPanels: collapsedCards.slice(0, 12),
+    };
+    const res = await ownerControl.saveAllToServer({ layoutPrefs: currentPrefs });
+    setIsSavingGlobalLayout(false);
+    if (res.success) {
+      sounds.playLineComplete();
+      setGlobalLayoutFeedback('✓ Lagret som global standard for alle!');
+    } else {
+      setGlobalLayoutFeedback(res.error || 'Kunne ikke lagre global standard.');
+    }
+    setTimeout(() => setGlobalLayoutFeedback(null), 3500);
+  };
+
   useEffect(() => {
     if (!isOpen) return;
 
@@ -180,7 +450,7 @@ export const QuizGameModal: React.FC<QuizGameModalProps> = ({
     const user = authService.getCurrentUser();
     const isOwner = user.role === 'owner' || ownerControl.isUnlocked();
     const isAuthenticatedHost = user.isAuthenticated || isOwner;
-    const paid = sessionTimer.hasFullPaidAccess() || isOwner;
+    const paid = sessionTimer.hasPaidAccess() || isOwner;
     setHasFullPaid(paid);
 
     if (initialTab === 'join') {
@@ -224,7 +494,7 @@ export const QuizGameModal: React.FC<QuizGameModalProps> = ({
 
     const unsubSession = sessionTimer.subscribe(() => {
       setSessionRemaining(sessionTimer.getFormattedRemaining());
-      setHasFullPaid(sessionTimer.hasFullPaidAccess());
+      setHasFullPaid(sessionTimer.hasPaidAccess());
     });
 
     const unsubClip = musicClipPlayer.subscribe(() => {
@@ -615,43 +885,179 @@ export const QuizGameModal: React.FC<QuizGameModalProps> = ({
   const effectiveDurationSec = snapshot?.durationSec || hostDurationSec || 60;
   const timeProgressPct = Math.max(0, Math.min(100, (remainingSec / effectiveDurationSec) * 100));
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/90 backdrop-blur-md overflow-y-auto animate-fadeIn">
-      <div className="relative w-full max-w-7xl bg-gradient-to-b from-[#17121e] via-[#100c16] to-[#08060c] border border-amber-400/40 rounded-3xl shadow-2xl overflow-hidden flex flex-col text-slate-100 my-auto max-h-[95vh]">
+  const editionShortTitle =
+    activeEdition === 'adult'
+      ? 'QUIZ'
+      : activeEdition === 'family'
+        ? 'Familie- & Barnequiz'
+        : activeEdition === 'senior'
+          ? 'Senior Grenland Quiz'
+          : 'JuleQuiz & Mimelek';
 
-        {/* Clean Top Header */}
-        <div className="px-4 sm:px-6 py-3.5 bg-[#1b1424] border-b border-white/10 flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
+  const editionIcon =
+    activeEdition === 'adult'
+      ? '🎭'
+      : activeEdition === 'family'
+        ? '🎈'
+        : activeEdition === 'senior'
+          ? '👵'
+          : '🎄';
+
+  if (isMinimized) {
+    const minAnchorClass =
+      dragPos !== null
+        ? ''
+        : dockMode === 'left' || dockMode === 'top_left'
+          ? 'fixed bottom-3 left-3'
+          : 'fixed bottom-3 right-3';
+
+    return (
+      <div className="fixed inset-0 z-50 pointer-events-none">
+        <div
+          ref={modalCardRef}
+          onPointerDown={handleHeaderDragStart}
+          style={
+            dragPos !== null
+              ? { position: 'fixed', left: dragPos.x, top: dragPos.y, touchAction: 'none' }
+              : { touchAction: 'none' }
+          }
+          className={`${minAnchorClass} pointer-events-auto flex items-center gap-2.5 px-3.5 py-2.5 rounded-2xl bg-[#191223]/95 border-2 border-amber-400/70 shadow-2xl text-slate-100 cursor-grab active:cursor-grabbing max-w-[95vw]`}
+        >
+          <span className="text-amber-300/80 font-mono text-sm select-none" title="Dra for å flytte">
+            ⠿
+          </span>
+          <span className="text-lg shrink-0">{editionIcon}</span>
+          <div className="min-w-0">
+            <div className="font-heading font-black text-xs text-white truncate">
+              {editionShortTitle}
+            </div>
+            <div className="text-[10px] text-amber-200/90 font-mono flex items-center gap-1.5">
+              {roomCode && <span>Kode: {hideSecretsOnHostDesktop && isHost ? '••••' : roomCode}</span>}
+              {(phase === 'question' || (snapshot?.mimeState?.active && snapshot.mimeState.status === 'acting')) && (
+                <span className={remainingSec <= 10 ? 'text-rose-300 font-black' : 'text-emerald-300 font-black'}>
+                  · ⏱️ {remainingSec}s
+                </span>
+              )}
+              {hasFullPaid && !isRemoteParticipant && (
+                <span className="text-emerald-300 hidden sm:inline">· {sessionRemaining}</span>
+              )}
+            </div>
+          </div>
+
+          <div className="flex items-center gap-1 shrink-0 ml-1">
+            <button
+              type="button"
+              onClick={() => {
+                sounds.playClick();
+                setIsMinimized(false);
+              }}
+              className="px-2.5 py-1.5 rounded-lg bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-[11px] cursor-pointer"
+              title="Utvid Quiz-dashboard"
+            >
+              ⤢ Utvid
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                sounds.playClick();
+                onClose();
+              }}
+              className="w-7 h-7 rounded-lg bg-white/10 hover:bg-white/20 text-slate-200 font-bold text-xs flex items-center justify-center cursor-pointer"
+              title="Lukk"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const isFloatingMode = windowSize === 'compact' || dockMode !== 'center' || dragPos !== null;
+
+  const backdropPositionClass =
+    dragPos !== null
+      ? 'pointer-events-none'
+      : isFloatingMode
+        ? dockMode === 'left'
+          ? 'pointer-events-none flex items-stretch justify-start p-2 sm:p-3'
+          : dockMode === 'right'
+            ? 'pointer-events-none flex items-stretch justify-end p-2 sm:p-3'
+            : dockMode === 'top_left'
+              ? 'pointer-events-none flex items-start justify-start p-2 sm:p-3'
+              : dockMode === 'top_right'
+                ? 'pointer-events-none flex items-start justify-end p-2 sm:p-3'
+                : 'pointer-events-none flex items-center justify-center p-2 sm:p-3'
+        : windowSize === 'expanded'
+          ? 'flex items-center justify-center p-1 sm:p-2 bg-black/90 backdrop-blur-md overflow-hidden'
+          : 'flex items-center justify-center p-2 sm:p-4 bg-black/90 backdrop-blur-md overflow-y-auto animate-fadeIn';
+
+  const cardSizeClass =
+    windowSize === 'expanded'
+      ? 'w-full h-[97vh] max-w-[98vw]'
+      : windowSize === 'compact'
+        ? 'w-[calc(100vw-1rem)] sm:w-[440px] md:w-[500px] max-h-[93vh]'
+        : isFloatingMode
+          ? 'w-[calc(100vw-1rem)] max-w-3xl max-h-[93vh]'
+          : 'w-full max-w-7xl my-auto max-h-[95vh]';
+
+  return (
+    <div className={`fixed inset-0 z-50 ${backdropPositionClass}`}>
+      <div
+        ref={modalCardRef}
+        style={
+          dragPos !== null
+            ? { position: 'fixed', left: dragPos.x, top: dragPos.y, margin: 0 }
+            : undefined
+        }
+        className={`relative pointer-events-auto ${cardSizeClass} bg-gradient-to-b from-[#17121e] via-[#100c16] to-[#08060c] border-2 ${
+          isFloatingMode ? 'border-amber-400/70' : 'border-amber-400/40'
+        } rounded-3xl shadow-2xl overflow-hidden flex flex-col text-slate-100`}
+      >
+
+        {/* Clean Top Header (Draggable when not expanded) */}
+        <div
+          onPointerDown={handleHeaderDragStart}
+          style={{ touchAction: windowSize === 'expanded' ? 'auto' : 'none' }}
+          className={`px-3 sm:px-5 py-3 bg-[#1b1424] border-b border-white/10 flex flex-wrap items-center justify-between gap-2.5 ${
+            windowSize !== 'expanded' ? 'cursor-grab active:cursor-grabbing' : ''
+          }`}
+        >
+          <div className="flex items-center gap-2.5 min-w-0">
+            {windowSize !== 'expanded' && (
+              <span
+                className="text-amber-300/75 hover:text-amber-200 font-mono text-base select-none shrink-0"
+                title="Dra her for å flytte dashboardet på skjermen"
+              >
+                ⠿
+              </span>
+            )}
             <div
-              className={`w-10 h-10 rounded-xl flex items-center justify-center font-black text-xl shrink-0 ${
+              className={`w-9 h-9 sm:w-10 sm:h-10 rounded-xl flex items-center justify-center font-black text-lg sm:text-xl shrink-0 ${
                 activeEdition === 'christmas'
                   ? 'bg-rose-500 text-white'
                   : 'bg-amber-400 text-slate-950'
               }`}
             >
-              {activeEdition === 'adult'
-                ? '🎭'
-                : activeEdition === 'family'
-                ? '🎈'
-                : activeEdition === 'senior'
-                ? '👵'
-                : '🎄'}
+              {editionIcon}
             </div>
-            <div>
-              <h2 className="font-heading font-black text-base sm:text-lg text-white leading-tight">
-                {activeEdition === 'adult'
-                  ? 'QUIZ — Kultur-, Musikk- & Fanquiz'
-                  : activeEdition === 'family'
-                    ? 'Familie- & Barnequiz — Kultur, Musikk & Ordlek'
-                    : activeEdition === 'senior'
-                      ? 'Senior Grenland Quiz — Musikk-gjetting, Lokalhistorie & Skriv-svar'
-                      : `JuleQuiz — Katolsk Familiequiz & ${CHRISTMAS_MIME_CARDS.length} Mimelek`}
+            <div className="min-w-0">
+              <h2 className="font-heading font-black text-sm sm:text-base text-white leading-tight truncate">
+                {windowSize === 'compact'
+                  ? editionShortTitle
+                  : activeEdition === 'adult'
+                    ? 'QUIZ — Kultur-, Musikk- & Fanquiz'
+                    : activeEdition === 'family'
+                      ? 'Familie- & Barnequiz — Kultur, Musikk & Ordlek'
+                      : activeEdition === 'senior'
+                        ? 'Senior Grenland Quiz — Musikk-gjetting, Lokalhistorie & Skriv-svar'
+                        : `JuleQuiz — Katolsk Familiequiz & ${CHRISTMAS_MIME_CARDS.length} Mimelek`}
               </h2>
-              <div className="flex items-center gap-2 text-xs text-slate-400 mt-0.5">
+              <div className="flex items-center gap-2 text-[11px] text-slate-400 mt-0.5 flex-wrap">
                 {(isHost && hasFullPaid && roomCode) || (isRemoteParticipant && snapshot?.roomCode) ? (
                   <>
                     <span>
-                      Koblingskode:{' '}
+                      Kode:{' '}
                       <strong className="font-mono text-amber-300">
                         {hideSecretsOnHostDesktop && isHost ? '••••' : roomCode}
                       </strong>
@@ -660,16 +1066,16 @@ export const QuizGameModal: React.FC<QuizGameModalProps> = ({
                   </>
                 ) : (
                   <>
-                    <span>Deltaker med kode eller betalt arrangør</span>
+                    <span>Deltaker med kode eller arrangør</span>
                     <span aria-hidden="true">·</span>
                   </>
                 )}
-                <span>Maks {effectiveDurationSec} sek per spørsmål</span>
+                <span>Maks {effectiveDurationSec}s</span>
                 {hasFullPaid && !isRemoteParticipant && (
                   <>
                     <span aria-hidden="true">·</span>
                     <span className="text-emerald-300 font-mono tabular-nums">
-                      Spilletid: {sessionRemaining}
+                      {sessionRemaining}
                     </span>
                   </>
                 )}
@@ -677,9 +1083,97 @@ export const QuizGameModal: React.FC<QuizGameModalProps> = ({
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {/* Flytt & Størrelse kontroller (Komprimer / Flytt i siden / Utvid) */}
+            <div className="flex items-center gap-0.5 p-0.5 rounded-lg bg-black/50 border border-white/15">
+              <button
+                type="button"
+                onClick={() => handleSelectDock('left')}
+                className={`px-2 py-1 rounded text-[11px] font-bold cursor-pointer transition-colors ${
+                  dockMode === 'left' && dragPos === null
+                    ? 'bg-amber-400 text-slate-950 font-black'
+                    : 'text-slate-300 hover:bg-white/10'
+                }`}
+                title="Fest til venstre side av skjermen"
+              >
+                ⬅️
+              </button>
+              <button
+                type="button"
+                onClick={() => handleSelectDock('center')}
+                className={`px-2 py-1 rounded text-[11px] font-bold cursor-pointer transition-colors ${
+                  dockMode === 'center' && dragPos === null
+                    ? 'bg-amber-400 text-slate-950 font-black'
+                    : 'text-slate-300 hover:bg-white/10'
+                }`}
+                title="Midtstill på skjermen"
+              >
+                ⏺️
+              </button>
+              <button
+                type="button"
+                onClick={() => handleSelectDock('right')}
+                className={`px-2 py-1 rounded text-[11px] font-bold cursor-pointer transition-colors ${
+                  dockMode === 'right' && dragPos === null
+                    ? 'bg-amber-400 text-slate-950 font-black'
+                    : 'text-slate-300 hover:bg-white/10'
+                }`}
+                title="Fest til høyre side av skjermen"
+              >
+                ➡️
+              </button>
+              <span className="w-px h-4 bg-white/15 mx-0.5" />
+              <button
+                type="button"
+                onClick={() => {
+                  sounds.playClick();
+                  setIsMinimized(true);
+                }}
+                className="px-2 py-1 rounded text-[11px] font-bold text-slate-300 hover:bg-white/10 cursor-pointer"
+                title="Minimer til liten flytende linje"
+              >
+                ➖
+              </button>
+              <button
+                type="button"
+                onClick={() => handleSelectWindowSize('compact')}
+                className={`px-2 py-1 rounded text-[11px] font-bold cursor-pointer transition-colors ${
+                  windowSize === 'compact'
+                    ? 'bg-emerald-400 text-slate-950 font-black'
+                    : 'text-slate-300 hover:bg-white/10'
+                }`}
+                title="Kompakt sidepanel (siden bak forblir synlig)"
+              >
+                📦 Kompakt
+              </button>
+              <button
+                type="button"
+                onClick={() => handleSelectWindowSize('standard')}
+                className={`px-2 py-1 rounded text-[11px] font-bold cursor-pointer transition-colors ${
+                  windowSize === 'standard'
+                    ? 'bg-emerald-400 text-slate-950 font-black'
+                    : 'text-slate-300 hover:bg-white/10'
+                }`}
+                title="Standard vindu"
+              >
+                🪟
+              </button>
+              <button
+                type="button"
+                onClick={() => handleSelectWindowSize('expanded')}
+                className={`px-2 py-1 rounded text-[11px] font-bold cursor-pointer transition-colors ${
+                  windowSize === 'expanded'
+                    ? 'bg-emerald-400 text-slate-950 font-black'
+                    : 'text-slate-300 hover:bg-white/10'
+                }`}
+                title="Utvid til full visning"
+              >
+                ⛶ Utvid
+              </button>
+            </div>
+
             {/* Switch back to Bingo seamlessly using same paid session */}
-            {isHost && onSwitchToBigScreenBingo && (
+            {isHost && onSwitchToBigScreenBingo && windowSize !== 'compact' && (
               <button
                 type="button"
                 onClick={() => {
@@ -687,12 +1181,12 @@ export const QuizGameModal: React.FC<QuizGameModalProps> = ({
                   onClose();
                   onSwitchToBigScreenBingo();
                 }}
-                className="px-3 py-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/15 text-xs font-bold text-amber-200 cursor-pointer transition-colors whitespace-nowrap shrink-0"
+                className="px-2.5 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/15 text-xs font-bold text-amber-200 cursor-pointer transition-colors whitespace-nowrap shrink-0"
               >
-                📺 Bingo Storskjerm
+                📺 Bingo
               </button>
             )}
-            {isHost && onSwitchToRemoteBingo && (
+            {isHost && onSwitchToRemoteBingo && windowSize !== 'compact' && (
               <button
                 type="button"
                 onClick={() => {
@@ -700,7 +1194,7 @@ export const QuizGameModal: React.FC<QuizGameModalProps> = ({
                   onClose();
                   onSwitchToRemoteBingo();
                 }}
-                className="px-3 py-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/15 text-xs font-bold text-cyan-200 cursor-pointer transition-colors whitespace-nowrap shrink-0"
+                className="px-2.5 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/15 text-xs font-bold text-cyan-200 cursor-pointer transition-colors whitespace-nowrap shrink-0"
               >
                 📡 Avstandsbingo
               </button>
@@ -711,7 +1205,7 @@ export const QuizGameModal: React.FC<QuizGameModalProps> = ({
                 sounds.playClick();
                 onClose();
               }}
-              className="w-9 h-9 rounded-lg bg-white/5 hover:bg-white/15 border border-white/15 text-slate-300 hover:text-white flex items-center justify-center font-bold cursor-pointer transition-colors"
+              className="w-8 h-8 rounded-lg bg-white/5 hover:bg-white/15 border border-white/15 text-slate-300 hover:text-white flex items-center justify-center font-bold cursor-pointer transition-colors"
               title="Lukk"
             >
               ✕
@@ -902,13 +1396,86 @@ export const QuizGameModal: React.FC<QuizGameModalProps> = ({
           {/* ===================================================== */}
           {/* VIEW 1: HOST CONTROL & ANSWER KEY (ARRANGØR & FASIT)  */}
           {/* ===================================================== */}
-          {activeTab === 'host' && isHost && (
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+          {activeTab === 'host' && isHost && (() => {
+            const CARD_META: Record<string, { label: string }> = {
+              code_bar: { label: '📡 Deltakerkode & TV-lenke' },
+              activity_bar: { label: '🎙️ Aktivitet, Tid & Trekk' },
+              question_card: {
+                label:
+                  activeEdition === 'christmas' && hostActivityMode === 'mime'
+                    ? '🎭 Katolsk Jule-Mimelek'
+                    : '❓ Aktivt spørsmål & Fasit',
+              },
+              leaderboard: { label: '🏆 Stillingsliste (Live)' },
+              teams: { label: `👥 Lag & Bord (${teams.length})` },
+              tips: { label: '💡 Arrangørtips' },
+            };
 
-              {/* Left 7 cols: Active Question, 60s Control & FASIT */}
-              <div className="lg:col-span-7 space-y-4">
+            const renderWrappedCard = (cardId: string, colIdx: number, colLen: number, body: React.ReactNode) => {
+              const isCollapsed = collapsedCards.includes(cardId);
+              const meta = CARD_META[cardId] || { label: cardId };
+              return (
+                <div key={cardId} className="space-y-1.5">
+                  <div className="flex items-center justify-between gap-2 px-2.5 py-1 rounded-xl bg-white/[0.04] border border-white/10 text-[11px]">
+                    <button
+                      type="button"
+                      onClick={() => toggleCardCollapse(cardId)}
+                      className="flex items-center gap-1.5 font-bold text-amber-200/90 hover:text-white cursor-pointer truncate"
+                      title={isCollapsed ? 'Utvid seksjon' : 'Komprimer seksjon'}
+                    >
+                      <span>{isCollapsed ? '▸' : '▾'}</span>
+                      <span className="truncate">{meta.label}</span>
+                      {isCollapsed && (
+                        <span className="text-[10px] text-slate-400 font-normal">(komprimert)</span>
+                      )}
+                    </button>
 
-                {/* Koblingskode & Storskjerm / TV Personvern Strip */}
+                    <div className="flex items-center gap-1 shrink-0">
+                      {showLayoutToolbar && (
+                        <>
+                          <button
+                            type="button"
+                            disabled={colIdx === 0}
+                            onClick={() => moveHostCard(cardId, 'up')}
+                            className="px-1.5 py-0.5 rounded bg-white/10 hover:bg-white/20 text-[10px] font-bold disabled:opacity-30 cursor-pointer"
+                            title="Flytt opp"
+                          >
+                            ▲
+                          </button>
+                          <button
+                            type="button"
+                            disabled={colIdx === colLen - 1}
+                            onClick={() => moveHostCard(cardId, 'down')}
+                            className="px-1.5 py-0.5 rounded bg-white/10 hover:bg-white/20 text-[10px] font-bold disabled:opacity-30 cursor-pointer"
+                            title="Flytt ned"
+                          >
+                            ▼
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => moveHostCard(cardId, 'swap')}
+                            className="px-1.5 py-0.5 rounded bg-amber-400/20 hover:bg-amber-400/35 text-amber-200 text-[10px] font-bold cursor-pointer"
+                            title="Flytt mellom venstre og høyre kolonne"
+                          >
+                            ⇄
+                          </button>
+                        </>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => toggleCardCollapse(cardId)}
+                        className="px-2 py-0.5 rounded bg-white/10 hover:bg-white/20 text-slate-200 text-[10px] font-bold cursor-pointer"
+                      >
+                        {isCollapsed ? 'Utvid' : 'Komprimer'}
+                      </button>
+                    </div>
+                  </div>
+                  {!isCollapsed && body}
+                </div>
+              );
+            };
+
+            const renderCodeBarCard = () => (
                 <div className="p-4 rounded-2xl bg-white/5 border border-white/10 space-y-3">
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
@@ -1005,8 +1572,9 @@ export const QuizGameModal: React.FC<QuizGameModalProps> = ({
                     </button>
                   </div>
                 </div>
+            );
 
-                {/* Activity Mode Bar: Spørsmålsquiz (Tilfeldig trekk) vs. Katolsk Mimelek (50 ord) */}
+            const renderActivityBarCard = () => (
                 <div className="p-3 rounded-2xl bg-gradient-to-r from-[#23121b] via-[#171222] to-[#111c19] border border-amber-400/30 flex flex-wrap items-center justify-between gap-2">
                   <div className="flex items-center gap-1.5 flex-wrap">
                     <button
@@ -1121,10 +1689,10 @@ export const QuizGameModal: React.FC<QuizGameModalProps> = ({
                     </div>
                   )}
                 </div>
+            );
 
-                {/* ===================================================== */}
-                {/* HOST MIMELEK PANEL (KATOLSKE JULE-MIMEORD)            */}
-                {/* ===================================================== */}
+            const renderQuestionCard = () => (
+              <div className="space-y-4">
                 {activeEdition === 'christmas' && hostActivityMode === 'mime' && (() => {
                   const mimeState = snapshot?.mimeState;
                   const currentTurnTeam = teams[activeMimeTeamIdx] || teams[0];
@@ -2059,10 +2627,9 @@ export const QuizGameModal: React.FC<QuizGameModalProps> = ({
                   );
                 })()}
               </div>
+            );
 
-              {/* Right 5 cols: Stillingsliste (Live), Teams, Live Answers & Moderation */}
-              <div className="lg:col-span-5 space-y-4">
-                {/* Live Stillingsliste (Rankings + Online Deltakere) */}
+            const renderLeaderboardCard = () => (
                 <div className="p-4 rounded-2xl bg-gradient-to-br from-amber-500/15 via-black/50 to-emerald-950/30 border border-amber-400/40 space-y-2.5">
                   <div className="flex items-center justify-between gap-2">
                     <h4 className="font-heading font-black text-sm text-amber-200 flex items-center gap-1.5">
@@ -2101,8 +2668,9 @@ export const QuizGameModal: React.FC<QuizGameModalProps> = ({
                     })}
                   </div>
                 </div>
+            );
 
-                {/* Team Status & Rename */}
+            const renderTeamsCard = () => (
                 <div className="p-4 rounded-2xl bg-white/5 border border-white/10 space-y-3">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <h4 className="font-heading font-bold text-sm text-white">
@@ -2251,8 +2819,9 @@ export const QuizGameModal: React.FC<QuizGameModalProps> = ({
                     })}
                   </div>
                 </div>
+            );
 
-                {/* Quick Tips for Physical vs Online */}
+            const renderTipsCard = () => (
                 <div className="p-4 rounded-2xl bg-black/40 border border-white/10 text-xs text-slate-300 space-y-1.5 leading-relaxed">
                   <div className="font-bold text-amber-300">💡 Slik kjører dere quizen sammen:</div>
                   <p>
@@ -2262,9 +2831,150 @@ export const QuizGameModal: React.FC<QuizGameModalProps> = ({
                     <strong>Online / Hybrid:</strong> Deltakerne logger inn gratis med koden fra mobilen sin, velger lagfarge og stemmer innen 60 sekunder!
                   </p>
                 </div>
+            );
+
+            const renderCardById = (cardId: string, idx: number, len: number) => {
+              switch (cardId) {
+                case 'code_bar':
+                  return renderWrappedCard(cardId, idx, len, renderCodeBarCard());
+                case 'activity_bar':
+                  return renderWrappedCard(cardId, idx, len, renderActivityBarCard());
+                case 'question_card':
+                  return renderWrappedCard(cardId, idx, len, renderQuestionCard());
+                case 'leaderboard':
+                  return renderWrappedCard(cardId, idx, len, renderLeaderboardCard());
+                case 'teams':
+                  return renderWrappedCard(cardId, idx, len, renderTeamsCard());
+                case 'tips':
+                  return renderWrappedCard(cardId, idx, len, renderTipsCard());
+                default:
+                  return null;
+              }
+            };
+
+            const isSingleColView = windowSize === 'compact' || hostSplitMode === 'stacked';
+            const leftColSpan = isSingleColView
+              ? ''
+              : hostSplitMode === '50_50'
+                ? 'lg:col-span-6'
+                : 'lg:col-span-7';
+            const rightColSpan = isSingleColView
+              ? ''
+              : hostSplitMode === '50_50'
+                ? 'lg:col-span-6'
+                : 'lg:col-span-5';
+
+            const leftColumnNode = (
+              <div key="host-col-left" className={`${leftColSpan} space-y-3.5`}>
+                {leftCards.map((cid, idx) => renderCardById(cid, idx, leftCards.length))}
               </div>
-            </div>
-          )}
+            );
+            const rightColumnNode = (
+              <div key="host-col-right" className={`${rightColSpan} space-y-3.5`}>
+                {rightCards.map((cid, idx) => renderCardById(cid, idx, rightCards.length))}
+              </div>
+            );
+            const orderedHostColumns = swapHostColumns
+              ? [rightColumnNode, leftColumnNode]
+              : [leftColumnNode, rightColumnNode];
+
+            return (
+              <div className="space-y-3.5">
+                {/* Quick Organizer / Admin Layout Toolbar */}
+                <div className="p-2.5 rounded-2xl bg-white/[0.04] border border-white/10 flex flex-wrap items-center justify-between gap-2 text-xs">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        sounds.playClick();
+                        setShowLayoutToolbar((v) => !v);
+                      }}
+                      className={`px-3 py-1.5 rounded-xl font-bold cursor-pointer border transition-colors ${
+                        showLayoutToolbar
+                          ? 'bg-amber-400 text-slate-950 border-white font-black'
+                          : 'bg-black/40 border-white/15 text-amber-200 hover:bg-white/10'
+                      }`}
+                    >
+                      {showLayoutToolbar ? '✅ Ferdig med visning' : '🎛️ Tilpass & flytt paneler'}
+                    </button>
+                    {globalLayoutFeedback && (
+                      <span className="text-emerald-300 font-bold text-[11px]">
+                        {globalLayoutFeedback}
+                      </span>
+                    )}
+                  </div>
+
+                  {showLayoutToolbar && (
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <div className="flex items-center gap-1 bg-black/45 p-1 rounded-lg border border-white/10">
+                        <span className="text-[10px] text-slate-300 font-bold px-1">Kolonner:</span>
+                        {[
+                          { id: '60_40' as const, label: '60/40' },
+                          { id: '50_50' as const, label: '50/50' },
+                          { id: 'stacked' as const, label: '1 kolonne' },
+                        ].map((sp) => (
+                          <button
+                            key={sp.id}
+                            type="button"
+                            onClick={() => {
+                              sounds.playClick();
+                              setHostSplitMode(sp.id);
+                            }}
+                            className={`px-2 py-0.5 rounded text-[11px] font-bold cursor-pointer ${
+                              hostSplitMode === sp.id
+                                ? 'bg-amber-400 text-slate-950 font-black'
+                                : 'text-slate-300 hover:bg-white/10'
+                            }`}
+                          >
+                            {sp.label}
+                          </button>
+                        ))}
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          sounds.playClick();
+                          setSwapHostColumns((v) => !v);
+                        }}
+                        className={`px-2.5 py-1 rounded-lg text-[11px] font-bold cursor-pointer border ${
+                          swapHostColumns
+                            ? 'bg-emerald-400 text-slate-950 border-white font-black'
+                            : 'bg-black/40 border-white/15 text-slate-200 hover:bg-white/10'
+                        }`}
+                      >
+                        ⇄ Bytt side
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={resetQuizDashboardLayout}
+                        className="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/15 text-slate-200 text-[11px] font-bold cursor-pointer"
+                      >
+                        ↺ Tilbakestill
+                      </button>
+
+                      {isOwnerUnlocked && (
+                        <button
+                          type="button"
+                          disabled={isSavingGlobalLayout}
+                          onClick={() => void handleSaveQuizLayoutAsGlobalDefault()}
+                          className="px-3 py-1 rounded-lg bg-gradient-to-r from-emerald-400 to-teal-400 hover:brightness-110 text-slate-950 font-black text-[11px] cursor-pointer shadow disabled:opacity-60"
+                          title="Eier: lagre denne størrelsen, plasseringen og panelrekkefølgen som standard for alle"
+                        >
+                          {isSavingGlobalLayout ? '⏳ Lagrer...' : '💾 Lagre som global standard'}
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                <div className={isSingleColView ? 'space-y-3.5' : 'grid grid-cols-1 lg:grid-cols-12 gap-5'}>
+                  {orderedHostColumns}
+                </div>
+              </div>
+            );
+          })()}
 
           {/* ===================================================== */}
           {/* VIEW 2: STORSKJERM / TV PROJECTION VIEW               */}

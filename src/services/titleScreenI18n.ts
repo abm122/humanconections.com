@@ -214,10 +214,10 @@ const NB_TEXTS: TitleScreenTexts = {
   drumTitle: 'Live Trekningstrommel & Sosialt Spill',
   drumBadge: 'Aktiv Trommel',
   drumDescPaid: 'Din arrangementspakke er aktiv — snurr kulene eller veksle fritt mellom Storskjerm, Avstandsbingo, QUIZ, Familiequiz, JuleQuiz og Memory!',
-  drumDescTrial: '5 minutters gratis prøvespill er åpent — test spillet nå eller betal som arrangør for alle 6 spill & koblingskode!',
-  drumDescGuest: 'Forhåndsvisning av 60fps trekningstrommel — prøv 5 min gratis eller logg inn som arrangør!',
-  try5MinFree: 'Prøv 5 min gratis',
-  choose4Games: 'Velg mellom alle 6 spill',
+  drumDescTrial: '10 minutters gratis prøvespill er åpent for alle spillene — test alle spill og koblingskode nå!',
+  drumDescGuest: 'Forhåndsvisning av 60fps trekningstrommel — prøv alle spill 10 min gratis eller logg inn som arrangør!',
+  try5MinFree: 'Prøv 10 min gratis (alle spill)',
+  choose4Games: 'Velg mellom alle spill',
   drumHint: 'Test trommelen, dra i sveiven eller rist kulene for å oppleve fysikken og lyden.',
   drumMeta: '75 kuler (B-I-N-G-O) · 60 fps animasjon',
 
@@ -234,8 +234,8 @@ const NB_TEXTS: TitleScreenTexts = {
   payBannerTextAfterRole: 'Betal trygt med Visa, Mastercard, Apple Pay eller Google Pay. Koblingskode og lenke genereres til deltakerne etter betaling.',
   chooseAndPayBtn: 'Velg & Betal Spilletid ➔',
 
-  trialBannerTitle: '5 Minutter Gratis Prøvespill er Åpen!',
-  trialBannerDesc: 'Test Bingo-opplevelsen gratis i 5 min. Betal spilletidspakke for å få koblingskode til Avstandsbingo, QUIZ, Familiequiz, JuleQuiz og Memory!',
+  trialBannerTitle: '10 Minutter Gratis Prøvespill på Alle Spill!',
+  trialBannerDesc: 'Prøv alle spillene fritt i 10 minutter — Storskjerm, Avstandsbingo, Musikkbingo, QUIZ, Familiequiz, JuleQuiz, Senior Grenland Quiz og Memory!',
   resumeTrialBtn: '▶ Fortsett Prøvespill',
   buyFullTimeBtn: '💳 Kjøp full spilletid ➔',
 
@@ -347,11 +347,11 @@ const NB_TEXTS: TitleScreenTexts = {
   remoteBtn: 'Avstandsbingo',
   joinQuizBtn: 'Bli med i Quiz',
 
-  resume5MinTrial: 'Fortsett 5-min prøvespill',
+  resume5MinTrial: 'Fortsett 10-min prøvespill',
   startPrefix: 'Start',
-  all4FormatsBtn: 'Alle 6 Spillformater (Bingo, Quiz & Memory)',
+  all4FormatsBtn: 'Alle Spillformater (Bingo, Quiz & Memory)',
   helperLockedTitle: 'Obligatorisk innlogging & betaling:',
-  helperLockedDesc: 'Logg inn og betal spilletid i feltet over (eller prøv 5 min gratis ved live-trommelen). Automatisk utlogging skjer når pakketiden utløper.',
+  helperLockedDesc: 'Logg inn og betal spilletid i feltet over (eller prøv alle spill 10 min gratis). Automatisk utlogging skjer når tiden utløper.',
   helperUnpaidEnd: 'Fullfør betaling i feltet «Obligatorisk betaling for å starte» for å åpne alle 6 spillformater.',
   helperActivePrefix: '✓ Innlogget som',
   helperRemainingSuffix: 'gjenstår (automatisk utlogging ved 00:00:00)',
@@ -411,10 +411,10 @@ const EN_TEXTS: TitleScreenTexts = {
   drumTitle: 'Live Number Tumbler & Social Game',
   drumBadge: 'Active Drum',
   drumDescPaid: 'Your event package is active — spin the balls or switch freely between Big Screen, Remote Bingo, QUIZ, Family Quiz, Christmas Quiz and Memory!',
-  drumDescTrial: '5-minute free trial is open — test the game now or pay as organizer for all 6 games & room code!',
-  drumDescGuest: 'Preview of 60fps ball tumbler — try 5 min free or sign in as organizer!',
-  try5MinFree: 'Try 5 min free',
-  choose4Games: 'Choose among all 6 games',
+  drumDescTrial: '10-minute free trial is open for all games — try every game & room code now!',
+  drumDescGuest: 'Preview of 60fps ball tumbler — try all games 10 min free or sign in as organizer!',
+  try5MinFree: 'Try 10 min free (all games)',
+  choose4Games: 'Choose among all games',
   drumHint: 'Test the drum, turn the crank or scramble the balls to experience the physics and sound.',
   drumMeta: '75 balls (B-I-N-G-O) · 60 fps animation',
 
@@ -431,8 +431,8 @@ const EN_TEXTS: TitleScreenTexts = {
   payBannerTextAfterRole: 'Pay securely with Visa, Mastercard, Apple Pay or Google Pay. Room join code & link are generated after payment.',
   chooseAndPayBtn: 'Select & Pay Playtime ➔',
 
-  trialBannerTitle: '5-Minute Free Trial Is Open!',
-  trialBannerDesc: 'Try the Bingo experience free for 5 minutes. Purchase a playtime pass to unlock room codes for Remote Bingo, QUIZ, Family Quiz & Christmas Quiz!',
+  trialBannerTitle: '10-Minute Free Trial Open for All Games!',
+  trialBannerDesc: 'Try all games free for 10 minutes — Big Screen, Remote Bingo, Music Bingo, QUIZ, Family Quiz, Christmas Quiz, Senior Grenland Quiz & Memory!',
   resumeTrialBtn: '▶ Resume Trial',
   buyFullTimeBtn: '💳 Buy Full Playtime ➔',
 
@@ -544,11 +544,11 @@ const EN_TEXTS: TitleScreenTexts = {
   remoteBtn: 'Remote Bingo',
   joinQuizBtn: 'Join QUIZ',
 
-  resume5MinTrial: 'Continue 5-min trial',
+  resume5MinTrial: 'Continue 10-min trial',
   startPrefix: 'Start',
-  all4FormatsBtn: 'All 6 Game Formats (Bingo, QUIZ & Memory)',
+  all4FormatsBtn: 'All Game Formats (Bingo, QUIZ & Memory)',
   helperLockedTitle: 'Mandatory Sign In & Payment:',
-  helperLockedDesc: 'Sign in and pay playtime in the box above (or try 5 min free on the live drum). Auto-logout occurs when your package expires.',
+  helperLockedDesc: 'Sign in and pay playtime in the box above (or try all games 10 min free). Auto-logout occurs when your time expires.',
   helperUnpaidEnd: 'Complete payment in «Mandatory Payment to Start» to unlock all 6 game formats.',
   helperActivePrefix: '✓ Signed in as',
   helperRemainingSuffix: 'remaining (auto-logout at 00:00:00)',
@@ -608,10 +608,10 @@ const TI_TEXTS: TitleScreenTexts = {
   drumTitle: 'ቀጥታዊ ናይ ቢንጎ ከበሮን ምንቅስቓስ ኵዕሶታትን',
   drumBadge: 'ንጡፍ ከበሮ',
   drumDescPaid: 'ናይ ምድላው ፓኬጅካ ንጡፍ እዩ — ኵዕሶታት ኣዝውር ወይ ብናጻ ናብ ዓቢ ስክሪን፣ ናይ ርሑቕ ቢንጎን QUIZታትን ተሰጋገር!',
-  drumDescTrial: 'ናይ 5 ደቒቕ ነጻ ፈተነ ክፉት እዩ — ሕጂ ቢንጎ ፈትን ወይ ንኩሎም 5 ጸወታታትን ኮድን ክፈል!',
-  drumDescGuest: 'ናይ 60fps ኵዕሶ ከበሮ ቅድመ-ምርኢት — 5 ደቒቕ ብነጻ ፈትን ወይ ንምሉእ ኣገልግሎት እቶን ክፈልን!',
-  try5MinFree: '5 ደቒቕ ብነጻ ፈትን',
-  choose4Games: 'ካብ ኩሎም 5 ጸወታታት ምረጽ',
+  drumDescTrial: 'ናይ 10 ደቒቕ ነጻ ፈተነ ንኹሎም ጸወታታት ክፉት እዩ — ሕጂ ኩሎም ጸወታታትን ኮድን ፈትን!',
+  drumDescGuest: 'ናይ 60fps ኵዕሶ ከበሮ ቅድመ-ምርኢት — ንኹሎም ጸወታታት 10 ደቒቕ ብነጻ ፈትን ወይ እቶን ክፈልን!',
+  try5MinFree: '10 ደቒቕ ብነጻ ፈትን (ኩሎም ጸወታታት)',
+  choose4Games: 'ካብ ኩሎም ጸወታታት ምረጽ',
   drumHint: 'ነቲ ከበሮ ፈትኖ፣ መዘውር ስሓብ ወይ ኵዕሶታት ነቅንቕ።',
   drumMeta: '75 ኵዕሶታት (B-I-N-G-O) · 60 fps ምንቅስቓስ',
 
@@ -628,8 +628,8 @@ const TI_TEXTS: TitleScreenTexts = {
   payBannerTextAfterRole: 'ብ Visa, Mastercard, Apple Pay ወይ Google Pay ብውሑስ መንገዲ ክፈል። ድሕሪ ክፍሊት መተኣሳሰሪ ኮድ ይፍጠር።',
   chooseAndPayBtn: 'ግዜ ጸወታ ምረጽን ክፈልን ➔',
 
-  trialBannerTitle: 'ናይ 5 ደቒቕ ነጻ ፈተነ ክፉት እዩ!',
-  trialBannerDesc: 'ን 5 ደቒቕ ቢንጎ ብነጻ ፈትን። ንርሑቕ ቢንጎ፣ QUIZ፣ ናይ ስድራቤትን ናይ ልደትን QUIZ መተኣሳሰሪ ኮድ ንምርካብ ፓኬጅ ግዛእ!',
+  trialBannerTitle: 'ናይ 10 ደቒቕ ነጻ ፈተነ ንኹሎም ጸወታታት ክፉት እዩ!',
+  trialBannerDesc: 'ን 10 ደቒቕ ኩሎም ጸወታታት ብነጻ ፈትን — ዓቢ ስክሪን፣ ናይ ርሑቕ ቢንጎ፣ QUIZ፣ ናይ ስድራቤት፣ ናይ ልደት፣ Senior Quizን Memoryን!',
   resumeTrialBtn: '▶ ፈተነ ቀጽል',
   buyFullTimeBtn: '💳 ምሉእ ግዜ ጸወታ ግዛእ ➔',
 
@@ -741,11 +741,11 @@ const TI_TEXTS: TitleScreenTexts = {
   remoteBtn: 'ናይ ርሑቕ ቢንጎ',
   joinQuizBtn: 'ኣብ QUIZ ተሳተፍ',
 
-  resume5MinTrial: 'ናይ 5 ደቒቕ ፈተነ ቀጽል',
+  resume5MinTrial: 'ናይ 10 ደቒቕ ፈተነ ቀጽል',
   startPrefix: 'ጀምር',
-  all4FormatsBtn: 'ኩሎም 5 ቅድታት ጸወታ (ቢንጎን QUIZን)',
+  all4FormatsBtn: 'ኩሎም ቅድታት ጸወታ (ቢንጎ፣ QUIZ & Memory)',
   helperLockedTitle: 'ግዴታዊ መእተውን ክፍሊትን:',
-  helperLockedDesc: 'ኣብ ላዕለዋይ ሳጹን እቶን ክፈልን (ወይ ኣብ ቀጥታዊ ከበሮ 5 ደቒቕ ብነጻ ፈትን)። ግዜ ፓኬጅ ምስ ተወድአ ብባዕሉ ይወጽእ።',
+  helperLockedDesc: 'ኣብ ላዕለዋይ ሳጹን እቶን ክፈልን (ወይ ኩሎም ጸወታታት 10 ደቒቕ ብነጻ ፈትን)። ግዜ ምስ ተወድአ ብባዕሉ ይወጽእ።',
   helperUnpaidEnd: 'ኩሎም 5 ቅድታት ጸወታ ንምኽፋት ኣብ «ንምጅማር ግዴታዊ ክፍሊት» ክፍሊት ወድእ።',
   helperActivePrefix: '✓ ብስም ዝኣተኻሉ',
   helperRemainingSuffix: 'ተሪፉ ኣሎ (ኣብ 00:00:00 ብባዕሉ ይወጽእ)',
@@ -782,8 +782,8 @@ const SV_TEXTS: TitleScreenTexts = {
   ownerPanel: 'Ägarpanel',
   editStartPanel: 'Redigera startpanel',
   doneEditing: 'Klar med redigering',
-  try5MinFree: 'Prova 5 min gratis',
-  choose4Games: 'Välj bland alla 5 spel',
+  try5MinFree: 'Prova 10 min gratis (alla spel)',
+  choose4Games: 'Välj bland alla spel',
   lockBannerTitle: 'Obligatorisk Inloggning & Betalning',
   loginAndPayBtn: 'Logga in & Betala ➔',
   sec2Title: '2. Spelläge:',
@@ -792,7 +792,7 @@ const SV_TEXTS: TitleScreenTexts = {
   cardsPerPlayerLabel: 'Brickor per spelare:',
   screenLabel: 'Skärm:',
   joinQuizBtn: 'Gå med i Quiz',
-  all4FormatsBtn: 'Alla 5 Spelformat (Bingo & QUIZ)',
+  all4FormatsBtn: 'Alla Spelformat (Bingo, QUIZ & Memory)',
 };
 
 const DE_TEXTS: TitleScreenTexts = {
@@ -815,8 +815,8 @@ const DE_TEXTS: TitleScreenTexts = {
   printCards: 'Karten drucken',
   heroBadge: 'Soziale Freude',
   heroSubtitle: 'Enjoy Bingo · Enjoy Together — Verbundenheit, Quiz, Memory & Teamgeist für Vereine & Familie',
-  try5MinFree: '5 Min kostenlos testen',
-  choose4Games: 'Alle 5 Spiele wählen',
+  try5MinFree: '10 Min kostenlos testen (alle Spiele)',
+  choose4Games: 'Alle Spiele wählen',
   lockBannerTitle: 'Pflichtanmeldung & Zahlung',
   lockBadge: 'Gesperrt',
   loginAndPayBtn: 'Anmelden & Bezahlen ➔',
@@ -831,7 +831,7 @@ const DE_TEXTS: TitleScreenTexts = {
   screenBigScreen: '📺 Großbild',
   joinQuizBtn: 'Quiz beitreten',
   startPrefix: 'Starten',
-  all4FormatsBtn: 'Alle 5 Spielformate (Bingo & QUIZ)',
+  all4FormatsBtn: 'Alle Spielformate (Bingo, QUIZ & Memory)',
 };
 
 const ES_TEXTS: TitleScreenTexts = {
@@ -855,8 +855,8 @@ const ES_TEXTS: TitleScreenTexts = {
   printCards: 'Imprimir Cartones',
   heroBadge: 'Bienestar Social',
   heroSubtitle: 'Enjoy Bingo · Enjoy Together — Conexión, música, equipo y alegría para asociaciones y amigos',
-  try5MinFree: 'Prueba 5 min gratis',
-  choose4Games: 'Elegir entre los 5 juegos',
+  try5MinFree: 'Prueba 10 min gratis (todos los juegos)',
+  choose4Games: 'Elegir entre todos los juegos',
   lockBannerTitle: 'Inicio de Sesión y Pago Obligatorios',
   lockBadge: 'Bloqueado',
   loginAndPayBtn: 'Iniciar Sesión y Pagar ➔',
@@ -871,7 +871,7 @@ const ES_TEXTS: TitleScreenTexts = {
   screenBigScreen: '📺 Pantalla Grande',
   joinQuizBtn: 'Unirse al Quiz',
   startPrefix: 'Iniciar',
-  all4FormatsBtn: 'Los 5 Formatos (Bingo y QUIZ)',
+  all4FormatsBtn: 'Todos los Formatos (Bingo, QUIZ y Memory)',
 };
 
 const FR_TEXTS: TitleScreenTexts = {
@@ -895,8 +895,8 @@ const FR_TEXTS: TitleScreenTexts = {
   printCards: 'Imprimer les grilles',
   heroBadge: 'Joie Sociale',
   heroSubtitle: 'Enjoy Bingo · Enjoy Together — Liens, chansons, mémoire et convivialité pour clubs et amis',
-  try5MinFree: 'Essai gratuit 5 min',
-  choose4Games: 'Choisir parmi les 5 jeux',
+  try5MinFree: 'Essai gratuit 10 min (tous les jeux)',
+  choose4Games: 'Choisir parmi tous les jeux',
   lockBannerTitle: 'Connexion & Paiement Obligatoires',
   lockBadge: 'Verrouillé',
   loginAndPayBtn: 'Se connecter & Payer ➔',
@@ -911,7 +911,7 @@ const FR_TEXTS: TitleScreenTexts = {
   screenBigScreen: '📺 Grand Écran',
   joinQuizBtn: 'Rejoindre le Quiz',
   startPrefix: 'Démarrer',
-  all4FormatsBtn: 'Les 5 Formats (Bingo & QUIZ)',
+  all4FormatsBtn: 'Tous les Formats (Bingo, QUIZ & Memory)',
 };
 
 const AR_TEXTS: TitleScreenTexts = {
@@ -935,8 +935,8 @@ const AR_TEXTS: TitleScreenTexts = {
   printCards: 'طباعة البطاقات',
   heroBadge: 'الفرح الاجتماعي',
   heroSubtitle: 'Enjoy Bingo · Enjoy Together — التواصل واللعب الجماعي وروح الفريق للعائلة والأصدقاء',
-  try5MinFree: 'جرّب 5 دقائق مجانًا',
-  choose4Games: 'اختر من بين الألعاب الخمس',
+  try5MinFree: 'جرّب 10 دقائق مجانًا (جميع الألعاب)',
+  choose4Games: 'اختر من بين جميع الألعاب',
   lockBannerTitle: 'تسجيل الدخول والدفع إلزاميان',
   lockBadge: 'مقفل',
   loginAndPayBtn: 'تسجيل الدخول والدفع ➔',
@@ -951,7 +951,7 @@ const AR_TEXTS: TitleScreenTexts = {
   screenBigScreen: '📺 شاشة كبيرة',
   joinQuizBtn: 'انضم إلى QUIZ',
   startPrefix: 'ابدأ',
-  all4FormatsBtn: 'جميع الألعاب الخمس (بينغو و QUIZ)',
+  all4FormatsBtn: 'جميع الألعاب (بينغو و QUIZ و Memory)',
 };
 
 export const TITLE_SCREEN_TRANSLATIONS: Record<SupportedLanguage, TitleScreenTexts> = {

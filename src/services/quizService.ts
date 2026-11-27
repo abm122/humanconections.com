@@ -206,7 +206,7 @@ class QuizService {
       });
 
       sessionTimer.subscribe(() => {
-        if (this.isHost && !sessionTimer.hasFullPaidAccess()) {
+        if (this.isHost && !sessionTimer.hasPaidAccess()) {
           this.leaveQuiz();
         }
       });

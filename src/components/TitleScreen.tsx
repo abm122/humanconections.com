@@ -16,8 +16,10 @@ import { dailySchedule } from '../services/schedule';
 import { authService, AuthUser } from '../services/authService';
 import {
   DEFAULT_CATEGORY_ORDER,
+  DEFAULT_LAYOUT_PREFS,
   DEFAULT_START_PANEL_DEFAULTS,
   ownerControl,
+  OwnerLayoutPrefs,
   OwnerProfile,
 } from '../services/ownerControl';
 import { sessionTimer } from '../services/sessionTimer';
@@ -170,6 +172,43 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
 
   const [customCountInput, setCustomCountInput] = useState<string>(() => String(playerNames.length));
 
+  const ALL_LEFT_DEFAULT = ['hero', 'host_code', 'kahoot_join', 'drum'];
+  const ALL_RIGHT_DEFAULT = [
+    'status_banner',
+    'category',
+    'mode',
+    'card_format',
+    'players',
+    'cards_screen',
+    'remote_strip',
+    'start_actions',
+  ];
+
+  const normalizeLayoutPrefs = (raw?: Partial<OwnerLayoutPrefs> | null): OwnerLayoutPrefs => {
+    const base = { ...DEFAULT_LAYOUT_PREFS, ...(raw || {}) };
+    const knownAll = new Set([...ALL_LEFT_DEFAULT, ...ALL_RIGHT_DEFAULT]);
+    const left = Array.isArray(base.leftSectionOrder)
+      ? base.leftSectionOrder.filter((id) => knownAll.has(id))
+      : [...ALL_LEFT_DEFAULT];
+    const right = Array.isArray(base.rightSectionOrder)
+      ? base.rightSectionOrder.filter((id) => knownAll.has(id) && !left.includes(id))
+      : [...ALL_RIGHT_DEFAULT];
+    for (const id of ALL_LEFT_DEFAULT) {
+      if (!left.includes(id) && !right.includes(id)) left.push(id);
+    }
+    for (const id of ALL_RIGHT_DEFAULT) {
+      if (!left.includes(id) && !right.includes(id)) right.push(id);
+    }
+    return {
+      ...base,
+      leftSectionOrder: left,
+      rightSectionOrder: right,
+      collapsedSections: Array.isArray(base.collapsedSections)
+        ? base.collapsedSections.filter((id) => knownAll.has(id))
+        : [],
+    };
+  };
+
   // Owner direct inline start-panel editing state
   const [isOwnerEditMode, setIsOwnerEditMode] = useState<boolean>(false);
   const [editAppTitle, setEditAppTitle] = useState<string>(ownerProfile.appTitle || 'Human-connection');
@@ -184,6 +223,13 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
   );
   const [editShowLiveDrum, setEditShowLiveDrum] = useState<boolean>(
     ownerProfile.startPanelDefaults?.showLiveDrum ?? true
+  );
+  const [editLayoutPrefs, setEditLayoutPrefs] = useState<OwnerLayoutPrefs>(() =>
+    normalizeLayoutPrefs(ownerProfile.layoutPrefs)
+  );
+  const userToggledCollapseRef = useRef<boolean>(false);
+  const [localCollapsedSections, setLocalCollapsedSections] = useState<string[]>(() =>
+    normalizeLayoutPrefs(ownerProfile.layoutPrefs).collapsedSections
   );
   const [isSavingOwnerSetup, setIsSavingOwnerSetup] = useState<boolean>(false);
   const [ownerEditFeedback, setOwnerEditFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -246,6 +292,11 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
         );
         setEditVisibleModules(nextProfile.visibleModules);
         setEditShowLiveDrum(nextProfile.startPanelDefaults?.showLiveDrum ?? true);
+        const normalizedLayout = normalizeLayoutPrefs(nextProfile.layoutPrefs);
+        setEditLayoutPrefs(normalizedLayout);
+        if (!userToggledCollapseRef.current) {
+          setLocalCollapsedSections(normalizedLayout.collapsedSections);
+        }
       }
 
       if (!userEditedSetupRef.current && nextProfile.startPanelDefaults) {
@@ -417,11 +468,74 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
       );
       setEditVisibleModules(ownerProfile.visibleModules);
       setEditShowLiveDrum(ownerProfile.startPanelDefaults?.showLiveDrum ?? true);
+      const normalizedLayout = normalizeLayoutPrefs(ownerProfile.layoutPrefs);
+      setEditLayoutPrefs(normalizedLayout);
       setOwnerEditFeedback(null);
       setIsOwnerEditMode(true);
     } else {
       setIsOwnerEditMode(false);
     }
+  };
+
+  const handleMoveLayoutSection = (sectionId: string, direction: 'up' | 'down' | 'swap') => {
+    sounds.playClick();
+    setEditLayoutPrefs((prev) => {
+      const normalized = normalizeLayoutPrefs(prev);
+      const left = [...normalized.leftSectionOrder];
+      const right = [...normalized.rightSectionOrder];
+      const inLeft = left.includes(sectionId);
+      if (direction === 'swap') {
+        if (inLeft) {
+          return {
+            ...normalized,
+            leftSectionOrder: left.filter((id) => id !== sectionId),
+            rightSectionOrder: [...right, sectionId],
+          };
+        }
+        return {
+          ...normalized,
+          leftSectionOrder: [...left, sectionId],
+          rightSectionOrder: right.filter((id) => id !== sectionId),
+        };
+      }
+      const list = inLeft ? left : right;
+      const idx = list.indexOf(sectionId);
+      if (idx === -1) return normalized;
+      if (direction === 'up' && idx > 0) {
+        [list[idx - 1], list[idx]] = [list[idx], list[idx - 1]];
+      } else if (direction === 'down' && idx < list.length - 1) {
+        [list[idx], list[idx + 1]] = [list[idx + 1], list[idx]];
+      }
+      return inLeft
+        ? { ...normalized, leftSectionOrder: list }
+        : { ...normalized, rightSectionOrder: list };
+    });
+  };
+
+  const handleToggleDefaultCollapseSection = (sectionId: string) => {
+    sounds.playClick();
+    setEditLayoutPrefs((prev) => {
+      const exists = prev.collapsedSections.includes(sectionId);
+      const nextCollapsed = exists
+        ? prev.collapsedSections.filter((id) => id !== sectionId)
+        : [...prev.collapsedSections, sectionId];
+      setLocalCollapsedSections(nextCollapsed);
+      return { ...prev, collapsedSections: nextCollapsed };
+    });
+  };
+
+  const handleToggleLocalCollapseSection = (sectionId: string) => {
+    sounds.playClick();
+    userToggledCollapseRef.current = true;
+    setLocalCollapsedSections((prev) =>
+      prev.includes(sectionId) ? prev.filter((id) => id !== sectionId) : [...prev, sectionId]
+    );
+  };
+
+  const handleResetLayoutPrefs = () => {
+    sounds.playClick();
+    setEditLayoutPrefs(normalizeLayoutPrefs(DEFAULT_LAYOUT_PREFS));
+    setLocalCollapsedSections([]);
   };
 
   const handleMoveCategory = (catKey: BingoTheme, direction: 'top' | 'up' | 'down') => {
@@ -460,12 +574,15 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
       showLiveDrum: editShowLiveDrum,
     };
 
+    const cleanLayout = normalizeLayoutPrefs(editLayoutPrefs);
+
     const res = await ownerControl.saveAllToServer({
       appTitle: editAppTitle.trim() || 'Human-connection',
       appSubtitle: editAppSubtitle.trim(),
       categoryOrder: editCategoryOrder,
       visibleModules: editVisibleModules,
       startPanelDefaults: nextDefaults,
+      layoutPrefs: cleanLayout,
     });
 
     setIsSavingOwnerSetup(false);
@@ -488,22 +605,28 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
 
   const handleStartTrialGame = () => {
     sounds.playClick();
-    const activated = sessionTimer.activateTrialSession(5);
+    const activated = sessionTimer.activateTrialSession(10);
     if (!activated) return;
+    const trialHostName = playerNames[0] || 'Prøvespiller';
     if (!authService.getCurrentUser().isAuthenticated) {
-      authService.loginAsPlayer(playerNames[0] || 'Prøvespiller', '🎮', '#f59e0b');
+      authService.loginAsPlayer(trialHostName, '🎮', '#f59e0b');
     }
+    remoteBingo.activateHostSession(undefined, trialHostName);
     setCanShowTrial(sessionTimer.canStartFreeTrial());
     setIsTrialActive(sessionTimer.isTrialSession() && sessionTimer.hasPaidAccess());
-    onStartGame(
-      selectedMode,
-      selectedTheme,
-      playerNames.length,
-      numCardsPerPlayer,
-      cardDisplayMode,
-      playerNames,
-      screenDevice
-    );
+    if (onOpenGameSelector) {
+      onOpenGameSelector();
+    } else {
+      onStartGame(
+        selectedMode,
+        selectedTheme,
+        playerNames.length,
+        numCardsPerPlayer,
+        cardDisplayMode,
+        playerNames,
+        screenDevice
+      );
+    }
   };
 
   const handleStartGameClick = () => {
@@ -728,7 +851,7 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
                           onClick={() => {
                             sounds.playClick();
                             setIsQuizMenuOpen(false);
-                            onOpenQuiz('adult', hasFullPaid ? 'host' : 'join');
+                            onOpenQuiz('adult', hasPaidSession ? 'host' : 'join');
                           }}
                           className="w-full px-3 py-2 rounded-xl text-xs font-bold text-purple-100 hover:bg-purple-500/25 flex items-center gap-2 cursor-pointer"
                           title={ts.quizTitle}
@@ -741,7 +864,7 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
                           onClick={() => {
                             sounds.playClick();
                             setIsQuizMenuOpen(false);
-                            onOpenQuiz('family', hasFullPaid ? 'host' : 'join');
+                            onOpenQuiz('family', hasPaidSession ? 'host' : 'join');
                           }}
                           className="w-full px-3 py-2 rounded-xl text-xs font-bold text-emerald-100 hover:bg-emerald-500/25 flex items-center gap-2 cursor-pointer"
                           title={ts.familyQuizTitle}
@@ -754,7 +877,7 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
                           onClick={() => {
                             sounds.playClick();
                             setIsQuizMenuOpen(false);
-                            onOpenQuiz('christmas', hasFullPaid ? 'host' : 'join');
+                            onOpenQuiz('christmas', hasPaidSession ? 'host' : 'join');
                           }}
                           className="w-full px-3 py-2 rounded-xl text-xs font-bold text-rose-100 hover:bg-rose-500/25 flex items-center gap-2 cursor-pointer"
                           title={ts.christmasQuizTitle}
@@ -767,7 +890,7 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
                           onClick={() => {
                             sounds.playClick();
                             setIsQuizMenuOpen(false);
-                            onOpenQuiz('senior', hasFullPaid ? 'host' : 'join');
+                            onOpenQuiz('senior', hasPaidSession ? 'host' : 'join');
                           }}
                           className="w-full px-3 py-2 rounded-xl text-xs font-black text-amber-200 hover:bg-amber-500/25 flex items-center gap-2 cursor-pointer"
                           title={ts.seniorQuizTitle}
@@ -1095,17 +1218,364 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
           </div>
         )}
 
-      {/* ADAPTIVE MULTI-SCREEN WORKSPACE: Single Column on Mobile, Balanced 12-Col Cockpit on PC / TV / Projector */}
-      <div
-        className={`relative z-10 w-full ${containerWidthClass} mx-auto flex-1 ${
-          screenDevice === 'mobile'
-            ? 'flex flex-col gap-3'
-            : 'grid grid-cols-1 lg:grid-cols-12 gap-4 xl:gap-6 items-start'
-        }`}
-      >
-        {/* LEFT COLUMN (PC/TV/Projector 5 cols, Mobile top): Hero + Host Code + Kahoot Quick Join + 3D Live Drum */}
-        <div className={screenDevice === 'mobile' ? 'space-y-3 w-full' : 'lg:col-span-5 space-y-3.5 w-full'}>
-          {/* HERO IDENTITY */}
+      {/* EIERENS DIREKTE REDIGERINGSPANEL FOR STARTPANELET & LAYOUT */}
+      {isOwnerUser && isOwnerEditMode && (
+        <div className={`relative z-20 w-full ${containerWidthClass} mx-auto mb-4 p-4 rounded-2xl bg-gradient-to-br from-emerald-950/90 via-[#151f19] to-black/95 border-2 border-emerald-400 shadow-2xl space-y-3.5 text-left animate-fadeIn`}>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-emerald-500/30 pb-2.5">
+            <div>
+              <div className="font-heading font-black text-sm text-emerald-200 flex items-center gap-1.5">
+                <span>👑</span>
+                <span>{ts.ownerEditBannerTitle}</span>
+              </div>
+              <p className="text-[11px] text-emerald-100/80 mt-0.5">
+                {ts.ownerEditBannerDesc} Bruk ▲ ▼ ⇄ og 📦 på boksene under for å flytte rekkefølge, bytte side eller komprimere som standard.
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 shrink-0">
+              <button
+                type="button"
+                disabled={isSavingOwnerSetup}
+                onClick={() => void handleSaveStartPanelSetup()}
+                className="px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-400 to-teal-400 hover:brightness-110 text-slate-950 font-black text-xs cursor-pointer shadow-lg flex items-center gap-1.5 disabled:opacity-60"
+              >
+                <span>💾</span>
+                <span>{isSavingOwnerSetup ? ts.savingBtn : ts.saveStartPanelBtn}</span>
+              </button>
+              {onOpenOwnerControl && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    sounds.playClick();
+                    onOpenOwnerControl();
+                  }}
+                  className="px-3 py-2 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-400/50 text-amber-200 font-bold text-xs cursor-pointer"
+                >
+                  ⚙️ {ts.openFullOwnerModalBtn}
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={handleToggleOwnerEditMode}
+                className="px-3 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-emerald-100 font-bold text-xs cursor-pointer"
+              >
+                ✅ {ts.doneEditing}
+              </button>
+            </div>
+          </div>
+
+          {ownerEditFeedback && (
+            <div
+              className={`p-2.5 rounded-xl text-xs font-bold border ${
+                ownerEditFeedback.type === 'success'
+                  ? 'bg-emerald-500/20 border-emerald-400/50 text-emerald-200'
+                  : 'bg-rose-500/20 border-rose-400/50 text-rose-200'
+              }`}
+            >
+              {ownerEditFeedback.type === 'success' ? '✅ ' : '⚠️ '}
+              {ownerEditFeedback.text}
+            </div>
+          )}
+
+          {/* App-tittel & Undertittel */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+            <div>
+              <label className="text-[11px] font-bold text-emerald-200 block mb-1">
+                {ts.editAppTitleLabel}
+              </label>
+              <input
+                type="text"
+                value={editAppTitle}
+                onChange={(e) => setEditAppTitle(e.target.value)}
+                className="w-full px-3 py-1.5 rounded-xl bg-black/70 border border-emerald-500/40 text-xs text-amber-100 font-bold outline-none focus:border-emerald-300"
+              />
+            </div>
+            <div>
+              <label className="text-[11px] font-bold text-emerald-200 block mb-1">
+                {ts.editAppSubtitleLabel}
+              </label>
+              <input
+                type="text"
+                value={editAppSubtitle}
+                onChange={(e) => setEditAppSubtitle(e.target.value)}
+                className="w-full px-3 py-1.5 rounded-xl bg-black/70 border border-emerald-500/40 text-xs text-amber-100 font-bold outline-none focus:border-emerald-300"
+              />
+            </div>
+          </div>
+
+          {/* Synlige moduler & knapper direkte på startpanelet */}
+          <div className="space-y-1.5">
+            <div className="text-[11px] font-bold text-emerald-200">{ts.editModulesLabel}</div>
+            <div className="flex flex-wrap gap-1.5">
+              {[
+                { key: 'showBigScreen', label: `📺 ${ts.bigScreen}` },
+                { key: 'showParticipants', label: `👥 ${ts.participants}` },
+                { key: 'showBroadcast', label: `📢 ${ts.broadcast}` },
+                { key: 'showMixer', label: `🎛️ ${ts.mixer}` },
+                { key: 'showQuests', label: `🎯 ${ts.quests}` },
+                { key: 'showSchedule', label: `📅 ${ts.schedule}` },
+                { key: 'showReport', label: `💬 ${ts.report}` },
+                { key: 'showPrint', label: `🖨️ ${ts.printCards}` },
+                { key: 'showIosInstall', label: `🍎 ${ts.iosApp}` },
+                { key: 'showDrumOnMobile', label: '📱 3D Trommel mobil' },
+                { key: 'familyKidsMode', label: '🧸 Familie- & Barnemodus' },
+              ].map((mod) => {
+                const active = Boolean(editVisibleModules[mod.key as keyof typeof editVisibleModules]);
+                return (
+                  <button
+                    key={mod.key}
+                    type="button"
+                    onClick={() => {
+                      sounds.playClick();
+                      setEditVisibleModules((prev) => ({
+                        ...prev,
+                        [mod.key]: !active,
+                      }));
+                    }}
+                    className={`px-2.5 py-1 rounded-lg text-[11px] font-bold cursor-pointer border transition-all ${
+                      active
+                        ? 'bg-emerald-500/25 border-emerald-400/60 text-emerald-100'
+                        : 'bg-black/60 border-rose-500/30 text-rose-300/80 line-through'
+                    }`}
+                  >
+                    {active ? '✓ ' : '✕ '}
+                    {mod.label}
+                  </button>
+                );
+              })}
+              <button
+                type="button"
+                onClick={() => {
+                  sounds.playClick();
+                  setEditShowLiveDrum((prev) => !prev);
+                }}
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-bold cursor-pointer border transition-all ${
+                  editShowLiveDrum
+                    ? 'bg-emerald-500/25 border-emerald-400/60 text-emerald-100'
+                    : 'bg-black/60 border-rose-500/30 text-rose-300/80 line-through'
+                }`}
+              >
+                {editShowLiveDrum ? '✓ ' : '✕ '}🎰 {ts.showLiveDrumToggle}
+              </button>
+            </div>
+          </div>
+
+          {/* Layout, Kolonne-bytte & Quiz-dashboard standardinnstillinger */}
+          <div className="pt-2.5 border-t border-emerald-500/25 flex flex-wrap items-center justify-between gap-2.5 text-[11px]">
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  sounds.playClick();
+                  setEditLayoutPrefs((prev) => ({ ...prev, swapColumns: !prev.swapColumns }));
+                }}
+                className={`px-3 py-1.5 rounded-lg font-bold cursor-pointer border transition-all ${
+                  editLayoutPrefs.swapColumns
+                    ? 'bg-amber-400 text-slate-950 border-white font-black'
+                    : 'bg-black/60 border-emerald-400/40 text-emerald-100 hover:bg-white/10'
+                }`}
+              >
+                ⇄ Bytt venstre ↔ høyre kolonne {editLayoutPrefs.swapColumns ? '(Byttet)' : ''}
+              </button>
+
+              <div className="flex items-center gap-1 bg-black/50 p-1 rounded-lg border border-emerald-500/30">
+                <span className="text-emerald-200 font-bold px-1">Quiz-størrelse:</span>
+                {[
+                  { id: 'compact' as const, label: '📦 Kompakt' },
+                  { id: 'standard' as const, label: '🪟 Standard' },
+                  { id: 'expanded' as const, label: '⛶ Utvidet' },
+                ].map((sz) => (
+                  <button
+                    key={sz.id}
+                    type="button"
+                    onClick={() => {
+                      sounds.playClick();
+                      setEditLayoutPrefs((prev) => ({ ...prev, quizDefaultSize: sz.id }));
+                    }}
+                    className={`px-2 py-0.5 rounded font-bold cursor-pointer ${
+                      editLayoutPrefs.quizDefaultSize === sz.id
+                        ? 'bg-emerald-400 text-slate-950 font-black'
+                        : 'text-emerald-100 hover:bg-white/10'
+                    }`}
+                  >
+                    {sz.label}
+                  </button>
+                ))}
+              </div>
+
+              <div className="flex items-center gap-1 bg-black/50 p-1 rounded-lg border border-emerald-500/30">
+                <span className="text-emerald-200 font-bold px-1">Quiz-side:</span>
+                {[
+                  { id: 'left' as const, label: '⬅️ Venstre' },
+                  { id: 'center' as const, label: '⏺️ Midt' },
+                  { id: 'right' as const, label: '➡️ Høyre' },
+                ].map((dk) => (
+                  <button
+                    key={dk.id}
+                    type="button"
+                    onClick={() => {
+                      sounds.playClick();
+                      setEditLayoutPrefs((prev) => ({ ...prev, quizDefaultDock: dk.id }));
+                    }}
+                    className={`px-2 py-0.5 rounded font-bold cursor-pointer ${
+                      editLayoutPrefs.quizDefaultDock === dk.id
+                        ? 'bg-amber-400 text-slate-950 font-black'
+                        : 'text-emerald-100 hover:bg-white/10'
+                    }`}
+                  >
+                    {dk.label}
+                  </button>
+                ))}
+              </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  sounds.playClick();
+                  setEditLayoutPrefs((prev) => ({ ...prev, quizSwapColumns: !prev.quizSwapColumns }));
+                }}
+                className={`px-2.5 py-1.5 rounded-lg font-bold cursor-pointer border ${
+                  editLayoutPrefs.quizSwapColumns
+                    ? 'bg-amber-400 text-slate-950 border-white font-black'
+                    : 'bg-black/60 border-emerald-500/30 text-emerald-100 hover:bg-white/10'
+                }`}
+              >
+                ⇄ Quiz-kolonner: {editLayoutPrefs.quizSwapColumns ? 'Byttet' : 'Standard'}
+              </button>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleResetLayoutPrefs}
+              className="px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-amber-200 font-bold cursor-pointer"
+            >
+              ↺ Tilbakestill layout
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ADAPTIVE MULTI-SCREEN WORKSPACE: Single Column on Mobile, Swappable & Reorderable 12-Col Cockpit on PC / TV / Projector */}
+      {(() => {
+        const activeLayout = isOwnerEditMode
+          ? editLayoutPrefs
+          : normalizeLayoutPrefs(ownerProfile.layoutPrefs);
+
+        const SECTION_META: Record<string, { label: string; collapsible?: boolean }> = {
+          hero: { label: '🪙 App-logo & Tittel', collapsible: false },
+          host_code: { label: '🔑 Aktiv romkode', collapsible: true },
+          kahoot_join: { label: '🎯 Bli med med kode', collapsible: true },
+          drum: { label: '🎰 Live Bingotrommel', collapsible: true },
+          status_banner: { label: '💳 Status & Spilletid', collapsible: false },
+          category: { label: `📂 ${ts.sec1Title}`, collapsible: true },
+          mode: { label: `✨ ${ts.sec2Title}`, collapsible: true },
+          card_format: { label: `🌟 ${ts.sec3Title}`, collapsible: true },
+          players: { label: `👥 ${ts.sec4Title}`, collapsible: true },
+          cards_screen: { label: '🖥️ Kort & Skjermformat', collapsible: true },
+          remote_strip: { label: `📡 ${ts.remoteTitle}`, collapsible: true },
+          start_actions: { label: '▶️ Startknapper', collapsible: false },
+        };
+
+        const renderWrappedSection = (
+          sectionId: string,
+          colIdx: number,
+          colLen: number,
+          isInRightContainer: boolean,
+          content: React.ReactNode
+        ) => {
+          const meta = SECTION_META[sectionId] || { label: sectionId, collapsible: true };
+          const isCollapsed = localCollapsedSections.includes(sectionId);
+          const isDefaultCollapsed = editLayoutPrefs.collapsedSections.includes(sectionId);
+          const showControls = isOwnerEditMode || meta.collapsible !== false;
+          const cardWrapClass = isInRightContainer
+            ? ''
+            : ALL_RIGHT_DEFAULT.includes(sectionId)
+              ? 'p-3.5 rounded-2xl bg-amber-950/60 border border-amber-500/30 shadow-xl'
+              : '';
+
+          return (
+            <div key={sectionId} className={`space-y-1 ${cardWrapClass}`}>
+              {showControls && (
+                <div
+                  className={`flex items-center justify-between gap-2 px-2 py-1 rounded-xl text-[11px] ${
+                    isOwnerEditMode
+                      ? 'bg-emerald-950/75 border border-emerald-400/50 text-emerald-100'
+                      : 'bg-black/25 border border-amber-500/15 text-amber-200/80'
+                  }`}
+                >
+                  <button
+                    type="button"
+                    onClick={() => handleToggleLocalCollapseSection(sectionId)}
+                    className="flex items-center gap-1.5 font-bold hover:text-white cursor-pointer truncate"
+                    title={isCollapsed ? 'Utvid seksjon' : 'Komprimer seksjon'}
+                  >
+                    <span>{isCollapsed ? '▸' : '▾'}</span>
+                    <span className="truncate">{meta.label}</span>
+                    {isCollapsed && (
+                      <span className="text-[10px] text-amber-300/75 font-normal">(komprimert)</span>
+                    )}
+                  </button>
+
+                  <div className="flex items-center gap-1 shrink-0">
+                    {isOwnerEditMode && (
+                      <>
+                        <button
+                          type="button"
+                          disabled={colIdx === 0}
+                          onClick={() => handleMoveLayoutSection(sectionId, 'up')}
+                          className="px-1.5 py-0.5 rounded bg-white/10 hover:bg-white/20 text-[10px] font-bold disabled:opacity-30 cursor-pointer"
+                          title="Flytt opp"
+                        >
+                          ▲
+                        </button>
+                        <button
+                          type="button"
+                          disabled={colIdx === colLen - 1}
+                          onClick={() => handleMoveLayoutSection(sectionId, 'down')}
+                          className="px-1.5 py-0.5 rounded bg-white/10 hover:bg-white/20 text-[10px] font-bold disabled:opacity-30 cursor-pointer"
+                          title="Flytt ned"
+                        >
+                          ▼
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleMoveLayoutSection(sectionId, 'swap')}
+                          className="px-1.5 py-0.5 rounded bg-amber-400/25 hover:bg-amber-400/40 text-amber-200 text-[10px] font-bold cursor-pointer"
+                          title="Flytt mellom venstre og høyre kolonne"
+                        >
+                          ⇄
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleToggleDefaultCollapseSection(sectionId)}
+                          className={`px-1.5 py-0.5 rounded text-[10px] font-bold cursor-pointer ${
+                            isDefaultCollapsed
+                              ? 'bg-emerald-400 text-slate-950 font-black'
+                              : 'bg-white/10 hover:bg-white/20 text-slate-200'
+                          }`}
+                          title="Sett om denne boksen skal være komprimert som standard for alle"
+                        >
+                          📦 {isDefaultCollapsed ? 'Skjult std' : 'Åpen std'}
+                        </button>
+                      </>
+                    )}
+                    {!isOwnerEditMode && meta.collapsible !== false && (
+                      <button
+                        type="button"
+                        onClick={() => handleToggleLocalCollapseSection(sectionId)}
+                        className="px-1.5 py-0.5 rounded bg-white/5 hover:bg-white/15 text-[10px] font-bold text-amber-200/80 cursor-pointer"
+                      >
+                        {isCollapsed ? 'Utvid' : 'Minimer'}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+              {!isCollapsed && content}
+            </div>
+          );
+        };
+
+        const renderHeroSection = () => (
           <div className="flex items-center gap-3.5 p-3 sm:p-4 rounded-2xl bg-black/35 border border-amber-500/20">
             <GoldenCoinLogo size="lg" showGlow onClick={handleLogoSecretClick} />
             <div className="text-left min-w-0">
@@ -1120,9 +1590,13 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
               </p>
             </div>
           </div>
+        );
 
-          {/* AKTIV ARRANGEMENTSKODE FOR BETALT ARRANGØR / EIER */}
-          {hasFullPaid && !remoteBingo.getIsRemotePlayer() && !quizService.getIsRemoteParticipant() && (
+        const renderHostCodeSection = () => {
+          if (!(hasPaidSession && !remoteBingo.getIsRemotePlayer() && !quizService.getIsRemoteParticipant())) {
+            return null;
+          }
+          return (
             <div className="p-3.5 rounded-2xl bg-gradient-to-r from-amber-950/90 via-[#2a1909] to-amber-950/85 border border-amber-400/60 shadow-xl space-y-2.5">
               <div className="flex items-center justify-between gap-2 flex-wrap">
                 <div className="flex items-center gap-2">
@@ -1190,9 +1664,10 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
                 </button>
               </div>
             </div>
-          )}
+          );
+        };
 
-          {/* KAHOOT-MODUS: BLI MED GRATIS MED KODE */}
+        const renderKahootJoinSection = () => (
           <div className="p-3.5 sm:p-4 rounded-2xl bg-gradient-to-r from-emerald-950/90 via-[#0d241c] to-cyan-950/85 border border-emerald-400/60 shadow-xl space-y-2.5">
             <div className="flex items-start gap-2.5">
               <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-emerald-400 to-teal-400 text-slate-950 flex items-center justify-center text-lg font-black shadow shrink-0">
@@ -1268,9 +1743,11 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
               )}
             </div>
           </div>
+        );
 
-          {/* 🎰 LIVE BINGOTROMMEL */}
-          {showDrumCard && (
+        const renderDrumSection = () => {
+          if (!showDrumCard) return null;
+          return (
             <div className="bg-gradient-to-b from-[#24150b] via-[#1a0f08] to-[#120a05] border border-amber-400/50 rounded-2xl p-3.5 sm:p-4 shadow-2xl space-y-2.5">
               <div className="flex flex-wrap items-center justify-between gap-2 border-b border-amber-500/20 pb-2.5">
                 <div className="flex items-center gap-2 min-w-0">
@@ -1285,7 +1762,7 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
                   </div>
                 </div>
 
-                {!hasFullPaid ? (
+                {!hasPaidSession ? (
                   canShowTrial ? (
                     <button
                       type="button"
@@ -1331,151 +1808,31 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
                 <span className="font-mono text-amber-400 font-bold">{ts.drumMeta}</span>
               </div>
             </div>
-          )}
-        </div>
+          );
+        };
 
-        {/* RIGHT COLUMN (PC/TV/Projector 7 cols): Main Setup & Launch Cockpit */}
-        <div
-          className={`${
-            screenDevice === 'mobile' ? 'w-full' : 'lg:col-span-7 w-full'
-          } bg-amber-950/60 backdrop-blur-md border border-amber-500/30 rounded-2xl p-3.5 sm:p-5 shadow-2xl space-y-3.5`}
-        >
-        {/* EIERENS DIREKTE REDIGERINGSPANEL FOR STARTPANELET */}
-        {isOwnerUser && isOwnerEditMode && (
-          <div className="p-4 rounded-2xl bg-gradient-to-br from-emerald-950/80 via-[#151f19] to-black/90 border-2 border-emerald-400 shadow-2xl space-y-3.5 text-left animate-fadeIn">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-emerald-500/30 pb-2.5">
-              <div>
-                <div className="font-heading font-black text-sm text-emerald-200 flex items-center gap-1.5">
-                  <span>👑</span>
-                  <span>{ts.ownerEditBannerTitle}</span>
-                </div>
-                <p className="text-[11px] text-emerald-100/80 mt-0.5">{ts.ownerEditBannerDesc}</p>
-              </div>
-              <div className="flex flex-wrap items-center gap-2 shrink-0">
-                <button
-                  type="button"
-                  disabled={isSavingOwnerSetup}
-                  onClick={() => void handleSaveStartPanelSetup()}
-                  className="px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-400 to-teal-400 hover:brightness-110 text-slate-950 font-black text-xs cursor-pointer shadow-lg flex items-center gap-1.5 disabled:opacity-60"
-                >
-                  <span>💾</span>
-                  <span>{isSavingOwnerSetup ? ts.savingBtn : ts.saveStartPanelBtn}</span>
-                </button>
-                {onOpenOwnerControl && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      sounds.playClick();
-                      onOpenOwnerControl();
-                    }}
-                    className="px-3 py-2 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-400/50 text-amber-200 font-bold text-xs cursor-pointer"
-                  >
-                    ⚙️ {ts.openFullOwnerModalBtn}
-                  </button>
-                )}
-              </div>
-            </div>
+        const renderSectionById = (sectionId: string, idx: number, len: number, inRightContainer: boolean) => {
+          let node: React.ReactNode = null;
+          if (sectionId === 'hero') node = renderHeroSection();
+          else if (sectionId === 'host_code') node = renderHostCodeSection();
+          else if (sectionId === 'kahoot_join') node = renderKahootJoinSection();
+          else if (sectionId === 'drum') node = renderDrumSection();
+          else if (sectionId === 'status_banner') node = renderStatusBannerSection();
+          else if (sectionId === 'category') node = renderCategorySection();
+          else if (sectionId === 'mode') node = renderModeSection();
+          else if (sectionId === 'card_format') node = renderCardFormatSection();
+          else if (sectionId === 'players') node = renderPlayersSection();
+          else if (sectionId === 'cards_screen') node = renderCardsScreenSection();
+          else if (sectionId === 'remote_strip') node = renderRemoteStripSection();
+          else if (sectionId === 'start_actions') node = renderStartActionsSection();
 
-            {ownerEditFeedback && (
-              <div
-                className={`p-2.5 rounded-xl text-xs font-bold border ${
-                  ownerEditFeedback.type === 'success'
-                    ? 'bg-emerald-500/20 border-emerald-400/50 text-emerald-200'
-                    : 'bg-rose-500/20 border-rose-400/50 text-rose-200'
-                }`}
-              >
-                {ownerEditFeedback.type === 'success' ? '✅ ' : '⚠️ '}
-                {ownerEditFeedback.text}
-              </div>
-            )}
+          if (!node) return null;
+          return renderWrappedSection(sectionId, idx, len, inRightContainer, node);
+        };
 
-            {/* App-tittel & Undertittel */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-              <div>
-                <label className="text-[11px] font-bold text-emerald-200 block mb-1">
-                  {ts.editAppTitleLabel}
-                </label>
-                <input
-                  type="text"
-                  value={editAppTitle}
-                  onChange={(e) => setEditAppTitle(e.target.value)}
-                  className="w-full px-3 py-1.5 rounded-xl bg-black/70 border border-emerald-500/40 text-xs text-amber-100 font-bold outline-none focus:border-emerald-300"
-                />
-              </div>
-              <div>
-                <label className="text-[11px] font-bold text-emerald-200 block mb-1">
-                  {ts.editAppSubtitleLabel}
-                </label>
-                <input
-                  type="text"
-                  value={editAppSubtitle}
-                  onChange={(e) => setEditAppSubtitle(e.target.value)}
-                  className="w-full px-3 py-1.5 rounded-xl bg-black/70 border border-emerald-500/40 text-xs text-amber-100 font-bold outline-none focus:border-emerald-300"
-                />
-              </div>
-            </div>
-
-            {/* Synlige moduler & knapper direkte på startpanelet */}
-            <div className="space-y-1.5">
-              <div className="text-[11px] font-bold text-emerald-200">{ts.editModulesLabel}</div>
-              <div className="flex flex-wrap gap-1.5">
-                {[
-                  { key: 'showBigScreen', label: `📺 ${ts.bigScreen}` },
-                  { key: 'showParticipants', label: `👥 ${ts.participants}` },
-                  { key: 'showBroadcast', label: `📢 ${ts.broadcast}` },
-                  { key: 'showMixer', label: `🎛️ ${ts.mixer}` },
-                  { key: 'showQuests', label: `🎯 ${ts.quests}` },
-                  { key: 'showSchedule', label: `📅 ${ts.schedule}` },
-                  { key: 'showReport', label: `💬 ${ts.report}` },
-                  { key: 'showPrint', label: `🖨️ ${ts.printCards}` },
-                  { key: 'showIosInstall', label: `🍎 ${ts.iosApp}` },
-                  { key: 'showDrumOnMobile', label: '📱 3D Trommel mobil' },
-                  { key: 'familyKidsMode', label: '🧸 Familie- & Barnemodus' },
-                ].map((mod) => {
-                  const active = Boolean(editVisibleModules[mod.key as keyof typeof editVisibleModules]);
-                  return (
-                    <button
-                      key={mod.key}
-                      type="button"
-                      onClick={() => {
-                        sounds.playClick();
-                        setEditVisibleModules((prev) => ({
-                          ...prev,
-                          [mod.key]: !active,
-                        }));
-                      }}
-                      className={`px-2.5 py-1 rounded-lg text-[11px] font-bold cursor-pointer border transition-all ${
-                        active
-                          ? 'bg-emerald-500/25 border-emerald-400/60 text-emerald-100'
-                          : 'bg-black/60 border-rose-500/30 text-rose-300/80 line-through'
-                      }`}
-                    >
-                      {active ? '✓ ' : '✕ '}
-                      {mod.label}
-                    </button>
-                  );
-                })}
-                <button
-                  type="button"
-                  onClick={() => {
-                    sounds.playClick();
-                    setEditShowLiveDrum((prev) => !prev);
-                  }}
-                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold cursor-pointer border transition-all ${
-                    editShowLiveDrum
-                      ? 'bg-emerald-500/25 border-emerald-400/60 text-emerald-100'
-                      : 'bg-black/60 border-rose-500/30 text-rose-300/80 line-through'
-                  }`}
-                >
-                  {editShowLiveDrum ? '✓ ' : '✕ '}🎰 {ts.showLiveDrumToggle}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* OBLIGATORISK INNLOGGING & BETALINGSBANNER */}
-        {!authUser.isAuthenticated ? (
+        // OBLIGATORISK INNLOGGING & BETALINGSBANNER
+        const renderStatusBannerSection = () => (
+        !authUser.isAuthenticated ? (
           <div className="p-4 rounded-2xl bg-gradient-to-r from-purple-950/90 via-[#25101e] to-black/90 border-2 border-purple-500 shadow-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-left">
             <div className="flex items-start gap-3">
               <div className="w-11 h-11 rounded-2xl bg-purple-600 text-white flex items-center justify-center text-xl shrink-0 shadow-lg ring-2 ring-white/20">
@@ -1494,6 +1851,16 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-2 shrink-0">
+              {canShowTrial && (
+                <button
+                  type="button"
+                  onClick={handleStartTrialGame}
+                  className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-emerald-400 to-teal-400 hover:brightness-110 text-slate-950 font-black text-xs sm:text-sm cursor-pointer shadow-lg transition-all active:scale-95 flex items-center gap-1.5"
+                >
+                  <span>🎮</span>
+                  <span>{ts.try5MinFree}</span>
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => {
@@ -1531,6 +1898,16 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-2 shrink-0">
+              {canShowTrial && (
+                <button
+                  type="button"
+                  onClick={handleStartTrialGame}
+                  className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-emerald-400 to-teal-400 hover:brightness-110 text-slate-950 font-black text-xs sm:text-sm shrink-0 cursor-pointer shadow-xl transition-all active:scale-95 flex items-center gap-1.5"
+                >
+                  <span>🎮</span>
+                  <span>{ts.try5MinFree}</span>
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => {
@@ -1563,10 +1940,23 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-2 shrink-0">
+              {onOpenGameSelector && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    sounds.playClick();
+                    onOpenGameSelector();
+                  }}
+                  className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-amber-300 via-amber-400 to-orange-400 hover:brightness-110 text-slate-950 font-black text-xs cursor-pointer shadow-lg flex items-center gap-1.5"
+                >
+                  <span>🎲</span>
+                  <span>{ts.choose4Games}</span>
+                </button>
+              )}
               <button
                 type="button"
                 onClick={handleStartGameClick}
-                className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-amber-400 to-amber-500 hover:brightness-110 text-slate-950 font-black text-xs cursor-pointer shadow-lg"
+                className="px-4 py-2.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-400/60 text-amber-100 font-black text-xs cursor-pointer shadow-lg"
               >
                 {ts.resumeTrialBtn}
               </button>
@@ -1649,9 +2039,10 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
               </div>
             </div>
           </div>
-        )}
+        ));
 
-        {/* 1. KATEGORI & INNHOLD SOM RULLEGARDIN */}
+        // 1. KATEGORI & INNHOLD SOM RULLEGARDIN
+        const renderCategorySection = () => (
         <div>
           <div className="flex flex-wrap items-center justify-between gap-2 mb-1.5">
             <label htmlFor="theme-select" className="text-xs font-bold uppercase tracking-wider text-amber-300 flex items-center gap-1.5">
@@ -1762,8 +2153,10 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
             </div>
           )}
         </div>
+        );
 
-        {/* 2. SPILLMODUS */}
+        // 2. SPILLMODUS
+        const renderModeSection = () => (
         <div className="pt-2 border-t border-amber-500/15">
           <div className="text-xs font-bold uppercase tracking-wider text-amber-300/80 mb-1.5 text-left">
             {ts.sec2Title}
@@ -1800,8 +2193,10 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
             ))}
           </div>
         </div>
+        );
 
-        {/* 3. KORTFORMAT PÅ BRETTET */}
+        // 3. KORTFORMAT PÅ BRETTET
+        const renderCardFormatSection = () => (
         <div className="pt-2 border-t border-amber-500/15">
           <div className="flex items-center justify-between mb-1.5">
             <span className="text-xs font-bold uppercase tracking-wider text-amber-300/80">{ts.sec3Title}</span>
@@ -1840,9 +2235,12 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
             ))}
           </div>
         </div>
+        );
 
-        {/* 4. ANTALL SPILLERE & NAVN */}
-        {selectedMode !== 'CALLER_CAGE' && (
+        // 4. ANTALL SPILLERE & NAVN
+        const renderPlayersSection = () => {
+          if (selectedMode === 'CALLER_CAGE') return null;
+          return (
           <div className="pt-2 border-t border-amber-500/15">
             <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
               <div className="flex items-center gap-2">
@@ -1965,9 +2363,11 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
               </button>
             </div>
           </div>
-        )}
+          );
+        };
 
-        {/* 5. ANTALL KORT & SKJERMFORMAT */}
+        // 5. ANTALL KORT & SKJERMFORMAT
+        const renderCardsScreenSection = () => (
         <div className="pt-2 border-t border-amber-500/15 flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             <span className="text-xs font-bold uppercase tracking-wider text-amber-300/80">
@@ -2034,9 +2434,12 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
             </div>
           </div>
         </div>
+        );
 
-        {/* AVSTANDSBINGO: DELTA FRA MOBILEN MED SPILLKODE */}
-        {onOpenRemoteBingo && (
+        // AVSTANDSBINGO: DELTA FRA MOBILEN MED SPILLKODE
+        const renderRemoteStripSection = () => {
+          if (!onOpenRemoteBingo) return null;
+          return (
           <div className="p-3.5 rounded-xl bg-gradient-to-r from-cyan-950/70 via-[#0a202d] to-black/80 border border-cyan-500/40 flex flex-col sm:flex-row items-center justify-between gap-3 text-left">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-xl bg-cyan-500/20 border border-cyan-400 text-cyan-200 text-xl flex items-center justify-center shrink-0">
@@ -2079,21 +2482,41 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
               )}
             </div>
           </div>
-        )}
+          );
+        };
 
-        {/* STOR START-KNAPP (KUN NÅR PRØVETID ELLER BETALING ER AKTIV) */}
+        // STOR START-KNAPP (KUN NÅR PRØVETID ELLER BETALING ER AKTIV)
+        const renderStartActionsSection = () => (
         <div className="pt-2 space-y-2">
           {!hasPaidSession ? null : !hasFullPaid ? (
-            <button
-              type="button"
-              onClick={handleStartGameClick}
-              className="w-full py-3.5 sm:py-4 px-4 font-heading font-black text-sm sm:text-base rounded-xl shadow-xl transform hover:scale-[1.01] active:scale-98 transition-all flex items-center justify-center gap-2 cursor-pointer ring-2 ring-white/50 bg-gradient-to-r from-amber-400 via-amber-300 to-amber-500 hover:from-amber-300 hover:to-amber-200 text-slate-950 shadow-amber-950/70"
-            >
-              <span>▶</span>
-              <span>
-                {ts.resume5MinTrial} ({playerNames.length} {playerNames.length === 1 ? ts.playerSingular : ts.playerPlural})
-              </span>
-            </button>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              <button
+                type="button"
+                onClick={handleStartGameClick}
+                className="py-3.5 sm:py-4 px-4 font-heading font-black text-sm sm:text-base rounded-xl shadow-xl transform hover:scale-[1.01] active:scale-98 transition-all flex items-center justify-center gap-2 cursor-pointer ring-2 ring-white/50 bg-gradient-to-r from-amber-400 via-amber-300 to-amber-500 hover:from-amber-300 hover:to-amber-200 text-slate-950 shadow-amber-950/70"
+              >
+                <span>▶</span>
+                <span>
+                  {ts.resume5MinTrial} ({playerNames.length} {playerNames.length === 1 ? ts.playerSingular : ts.playerPlural})
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  sounds.playClick();
+                  if (onOpenGameSelector) {
+                    onOpenGameSelector();
+                  } else if (onOpenAudience) {
+                    onOpenAudience();
+                  }
+                }}
+                className="py-3.5 sm:py-4 px-4 font-heading font-black text-sm sm:text-base rounded-xl shadow-xl transform hover:scale-[1.01] active:scale-98 transition-all flex items-center justify-center gap-2 cursor-pointer ring-2 ring-emerald-300 bg-gradient-to-r from-emerald-500 via-teal-500 to-cyan-500 hover:brightness-110 text-slate-950 shadow-emerald-950/70"
+              >
+                <span>🎭 / 🎈 / 📺</span>
+                <span>{ts.all4FormatsBtn}</span>
+              </button>
+            </div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
               <button
@@ -2144,8 +2567,46 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
             )}
           </div>
         </div>
-        </div>
-      </div>
+        );
+
+        const leftColumnNode = (
+          <div
+            key="start-col-left"
+            className={screenDevice === 'mobile' ? 'space-y-3 w-full' : 'lg:col-span-5 space-y-3.5 w-full'}
+          >
+            {activeLayout.leftSectionOrder.map((sid, idx) =>
+              renderSectionById(sid, idx, activeLayout.leftSectionOrder.length, false)
+            )}
+          </div>
+        );
+
+        const rightColumnNode = (
+          <div
+            key="start-col-right"
+            className={`${
+              screenDevice === 'mobile' ? 'w-full' : 'lg:col-span-7 w-full'
+            } bg-amber-950/60 backdrop-blur-md border border-amber-500/30 rounded-2xl p-3.5 sm:p-5 shadow-2xl space-y-3.5`}
+          >
+            {activeLayout.rightSectionOrder.map((sid, idx) =>
+              renderSectionById(sid, idx, activeLayout.rightSectionOrder.length, true)
+            )}
+          </div>
+        );
+
+        return (
+          <div
+            className={`relative z-10 w-full ${containerWidthClass} mx-auto flex-1 ${
+              screenDevice === 'mobile'
+                ? 'flex flex-col gap-3'
+                : 'grid grid-cols-1 lg:grid-cols-12 gap-4 xl:gap-6 items-start'
+            }`}
+          >
+            {activeLayout.swapColumns
+              ? [rightColumnNode, leftColumnNode]
+              : [leftColumnNode, rightColumnNode]}
+          </div>
+        );
+      })()}
 
       {/* FOOTER */}
       <footer className={`relative z-10 w-full ${containerWidthClass} mx-auto text-center text-[11px] text-amber-300/65 font-medium py-3 flex flex-wrap items-center justify-center gap-x-3 gap-y-1`}>

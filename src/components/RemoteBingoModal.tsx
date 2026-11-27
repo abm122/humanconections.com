@@ -50,10 +50,10 @@ export const RemoteBingoModal: React.FC<RemoteBingoModalProps> = ({
   const [authUser, setAuthUser] = useState<AuthUser>(() => authService.getCurrentUser());
   const isOwnerNow = ownerControl.isUnlocked();
   const [hasPaid, setHasPaid] = useState<boolean>(
-    () => !remoteBingo.getIsRemotePlayer() && ((authService.getCurrentUser().isAuthenticated && sessionTimer.hasFullPaidAccess()) || isOwnerNow)
+    () => !remoteBingo.getIsRemotePlayer() && ((authService.getCurrentUser().isAuthenticated && sessionTimer.hasPaidAccess()) || isOwnerNow)
   );
   const [activeTab, setActiveTab] = useState<'join' | 'host' | 'messages'>(
-    !remoteBingo.getIsRemotePlayer() && ((authService.getCurrentUser().isAuthenticated && sessionTimer.hasFullPaidAccess()) || isOwnerNow)
+    !remoteBingo.getIsRemotePlayer() && ((authService.getCurrentUser().isAuthenticated && sessionTimer.hasPaidAccess()) || isOwnerNow)
       ? 'host'
       : 'join'
   );
@@ -114,7 +114,7 @@ export const RemoteBingoModal: React.FC<RemoteBingoModalProps> = ({
       const currentU = authService.getCurrentUser();
       const isOwner = currentU.role === 'owner' || ownerControl.isUnlocked();
       const isRemoteNow = remoteBingo.getIsRemotePlayer() && !isOwner;
-      const paidNow = !isRemoteNow && ((currentU.isAuthenticated && sessionTimer.hasFullPaidAccess()) || isOwner);
+      const paidNow = !isRemoteNow && ((currentU.isAuthenticated && sessionTimer.hasPaidAccess()) || isOwner);
       setHasPaid(paidNow);
       setSessionRemaining(sessionTimer.getFormattedRemaining());
       setAuthUser(currentU);
@@ -136,7 +136,7 @@ export const RemoteBingoModal: React.FC<RemoteBingoModalProps> = ({
   }, [isOpen, isHostPlaying, initialJoinCode]);
 
   useEffect(() => {
-    if (isHostPlaying && !remoteBingo.getIsRemotePlayer() && ((authService.getCurrentUser().isAuthenticated && sessionTimer.hasFullPaidAccess()) || ownerControl.isUnlocked())) {
+    if (isHostPlaying && !remoteBingo.getIsRemotePlayer() && ((authService.getCurrentUser().isAuthenticated && sessionTimer.hasPaidAccess()) || ownerControl.isUnlocked())) {
       setActiveTab('host');
     }
   }, [isHostPlaying]);
@@ -225,20 +225,20 @@ export const RemoteBingoModal: React.FC<RemoteBingoModalProps> = ({
 
     const unsubSession = sessionTimer.subscribe(() => {
       const u = authService.getCurrentUser();
-      setHasPaid(!remoteBingo.getIsRemotePlayer() && ((u.isAuthenticated && sessionTimer.hasFullPaidAccess()) || ownerControl.isUnlocked()));
+      setHasPaid(!remoteBingo.getIsRemotePlayer() && ((u.isAuthenticated && sessionTimer.hasPaidAccess()) || ownerControl.isUnlocked()));
       setSessionRemaining(sessionTimer.getFormattedRemaining());
     });
 
     const unsubAuth = authService.subscribe(() => {
       const u = authService.getCurrentUser();
       setAuthUser(u);
-      setHasPaid(!remoteBingo.getIsRemotePlayer() && ((u.isAuthenticated && sessionTimer.hasFullPaidAccess()) || ownerControl.isUnlocked()));
+      setHasPaid(!remoteBingo.getIsRemotePlayer() && ((u.isAuthenticated && sessionTimer.hasPaidAccess()) || ownerControl.isUnlocked()));
     });
 
     const unsubOwner = ownerControl.subscribe(() => {
       const u = authService.getCurrentUser();
       setBannedList(ownerControl.getBannedParticipants());
-      setHasPaid(!remoteBingo.getIsRemotePlayer() && ((u.isAuthenticated && sessionTimer.hasFullPaidAccess()) || ownerControl.isUnlocked()));
+      setHasPaid(!remoteBingo.getIsRemotePlayer() && ((u.isAuthenticated && sessionTimer.hasPaidAccess()) || ownerControl.isUnlocked()));
     });
 
     // Listen for participant messages to host and replies

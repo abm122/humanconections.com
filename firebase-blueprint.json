@@ -13,6 +13,7 @@
         "categoryOrder": { "type": "array", "description": "Ordered list of bingo category keys" },
         "visibleModules": { "type": "object", "description": "Boolean visibility flags for UI modules" },
         "startPanelDefaults": { "type": "object", "description": "Owner-configured default setup for the start/player panel" },
+        "layoutPrefs": { "type": "object", "description": "Owner-configured section ordering, column swap, collapse states, and Quiz dashboard defaults" },
         "isMonetizationActive": { "type": "boolean" },
         "commissionPercent": { "type": "number" },
         "fixedFeePerPlayer": { "type": "number" },

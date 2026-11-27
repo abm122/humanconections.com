@@ -32,7 +32,7 @@ import {
   googleProvider,
   handleFirestoreError,
 } from '../firebase';
-import type { OwnerProfile, StartPanelDefaults } from './ownerControl';
+import type { OwnerLayoutPrefs, OwnerProfile, StartPanelDefaults } from './ownerControl';
 import type {
   CommissionTransaction,
   OwnerMonetizationSettings,
@@ -61,6 +61,7 @@ export interface CloudPublicConfig {
   categoryOrder: string[];
   visibleModules: OwnerProfile['visibleModules'];
   startPanelDefaults?: StartPanelDefaults;
+  layoutPrefs?: OwnerLayoutPrefs;
   isMonetizationActive: boolean;
   commissionPercent: number;
   fixedFeePerPlayer: number;
@@ -320,6 +321,41 @@ class FirebasePersistenceService {
           Math.min(100, Math.round(Number(profile.startPanelDefaults?.defaultPlayerCount) || 2))
         ),
         showLiveDrum: Boolean(profile.startPanelDefaults?.showLiveDrum ?? true),
+      },
+      layoutPrefs: {
+        swapColumns: Boolean(profile.layoutPrefs?.swapColumns ?? false),
+        leftSectionOrder: Array.isArray(profile.layoutPrefs?.leftSectionOrder)
+          ? profile.layoutPrefs!.leftSectionOrder.slice(0, 12).map((s) => String(s).slice(0, 40))
+          : ['hero', 'host_code', 'kahoot_join', 'drum'],
+        rightSectionOrder: Array.isArray(profile.layoutPrefs?.rightSectionOrder)
+          ? profile.layoutPrefs!.rightSectionOrder.slice(0, 12).map((s) => String(s).slice(0, 40))
+          : [
+              'status_banner',
+              'category',
+              'mode',
+              'card_format',
+              'players',
+              'cards_screen',
+              'remote_strip',
+              'start_actions',
+            ],
+        collapsedSections: Array.isArray(profile.layoutPrefs?.collapsedSections)
+          ? profile.layoutPrefs!.collapsedSections.slice(0, 12).map((s) => String(s).slice(0, 40))
+          : [],
+        quizSwapColumns: Boolean(profile.layoutPrefs?.quizSwapColumns ?? false),
+        quizDefaultSize: (['compact', 'standard', 'expanded'] as const).includes(
+          profile.layoutPrefs?.quizDefaultSize as any
+        )
+          ? profile.layoutPrefs!.quizDefaultSize
+          : 'standard',
+        quizDefaultDock: (['center', 'left', 'right', 'top_left', 'top_right'] as const).includes(
+          profile.layoutPrefs?.quizDefaultDock as any
+        )
+          ? profile.layoutPrefs!.quizDefaultDock
+          : 'center',
+        quizCollapsedPanels: Array.isArray(profile.layoutPrefs?.quizCollapsedPanels)
+          ? profile.layoutPrefs!.quizCollapsedPanels.slice(0, 12).map((s) => String(s).slice(0, 40))
+          : [],
       },
       isMonetizationActive: Boolean(pricing.isMonetizationActive ?? true),
       commissionPercent: sanitizeNonNeg(pricing.commissionPercent, 15),
