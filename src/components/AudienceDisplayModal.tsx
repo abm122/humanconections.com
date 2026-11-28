@@ -17,6 +17,9 @@ import { QuizEdition } from '../data/quizQuestions';
 import { MUSIC_BINGO_SONGS, MusicBingoSong } from '../data/musicBingoSongs';
 import { musicBingoService, MusicBingoSnapshot } from '../services/musicBingoService';
 import { musicClipPlayer, MusicClipPlayerState } from '../services/musicClipPlayer';
+import { SupportedLanguage, useTranslation } from '../services/i18n';
+import { formatMilestoneLabel, getBingoUiTexts, localizeBingoPattern } from '../services/bingoUiI18n';
+import { getAudienceExtraTexts } from '../services/audienceExtraI18n';
 
 export type AudienceViewOption =
   | 'multiplayer_ril'
@@ -90,8 +93,14 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
   const [musicSnap, setMusicSnap] = useState<MusicBingoSnapshot>(() => musicBingoService.getSnapshot());
   const [musicClipDuration, setMusicClipDuration] = useState<number>(30);
   const [musicRemainingSec, setMusicRemainingSec] = useState<number>(0);
+  const { lang } = useTranslation();
+  const ui = getBingoUiTexts(lang);
+  const ax = getAudienceExtraTexts(lang);
+  const langRef = useRef<SupportedLanguage>(lang);
+  langRef.current = lang;
+
   const [musicSearch, setMusicSearch] = useState<string>('');
-  const [musicCategoryFilter, setMusicCategoryFilter] = useState<string>('Alle');
+  const [musicCategoryFilter, setMusicCategoryFilter] = useState<string>('ALL');
   const [hideMusicTitleUntilReveal, setHideMusicTitleUntilReveal] = useState<boolean>(true);
   const [copiedMusicJoinLink, setCopiedMusicJoinLink] = useState<boolean>(false);
   const [clipPlayer, setClipPlayer] = useState<MusicClipPlayerState>(() => musicClipPlayer.getState());
@@ -126,7 +135,11 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
     });
     const unsubJoin = remoteBingo.onParticipantJoined((p, total) => {
       sounds.playPop(1.25);
-      setStorskjermJoinNotice(`👋 ${p.name} ble med i rommet (${p.game || 'Avstandsbingo'})! (${total} tilkoblet)`);
+      const curUi = getBingoUiTexts(langRef.current);
+      const curAx = getAudienceExtraTexts(langRef.current);
+      setStorskjermJoinNotice(
+        `👋 ${curUi.participantJoinedRoom.replace('{name}', p.name)} (${total} ${curAx.joinConnectedSuffix})`
+      );
       window.setTimeout(() => setStorskjermJoinNotice(null), 5500);
     });
     const unsubNewRound = remoteBingo.onNewRound(() => {
@@ -135,6 +148,13 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
     });
     const unsubMusic = musicBingoService.subscribe(() => {
       setMusicSnap(musicBingoService.getSnapshot());
+    });
+    const unsubMusicClaim = musicBingoService.onClaim(() => {
+      sounds.playLineComplete();
+    });
+    const unsubMusicNewRound = musicBingoService.onNewRound(() => {
+      musicClipPlayer.stop();
+      setActiveClaim(null);
     });
     const unsubClip = musicClipPlayer.subscribe(() => {
       setClipPlayer(musicClipPlayer.getState());
@@ -145,6 +165,8 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
       unsubJoin();
       unsubNewRound();
       unsubMusic();
+      unsubMusicClaim();
+      unsubMusicNewRound();
       unsubClip();
     };
   }, []);
@@ -171,10 +193,10 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
       remoteBingo.syncTvStateToRoom({
         calledBalls,
         players,
-        themeTitle: `Storskjerm RIL (${totalCount} spillere · Runde ${roundNumber})`,
+        themeTitle: `${ax.tvThemePrefix} (${totalCount} ${ui.players} · ${ui.round} ${roundNumber})`,
       });
     }
-  }, [isOpen, canActAsHost, calledBalls, players, remotePlayers.length, roundNumber]);
+  }, [isOpen, canActAsHost, calledBalls, players, remotePlayers.length, roundNumber, ax.tvThemePrefix, ui.players, ui.round]);
 
   if (!isOpen) return null;
 
@@ -186,10 +208,10 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
             🔒
           </div>
           <h2 className="font-heading font-black text-xl text-amber-200">
-            Innlogging og spilletid kreves for Storskjerm
+            {ui.audienceLockedTitle}
           </h2>
           <p className="text-xs text-amber-300/80 leading-relaxed">
-            Storskjermvisning krever aktiv innlogging og gyldig spilletid (Kort, Apple Pay eller Google Pay).
+            {ui.audienceLockedDesc}
           </p>
           <div className="pt-2">
             <button
@@ -199,7 +221,7 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
               }}
               className="w-full py-3 rounded-xl bg-gradient-to-r from-amber-400 to-amber-500 text-slate-950 font-black text-xs cursor-pointer shadow hover:brightness-110"
             >
-              ⇦ Tilbake til startmenyen (Logg inn & Betaling)
+              ⇦ {ui.backToStart}
             </button>
           </div>
         </div>
@@ -300,25 +322,25 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
               <div className="min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
                   <h1 className="font-display text-lg sm:text-xl font-black text-amber-100 tracking-tight leading-none">
-                    Human-connection · STORSKJERM
+                    {ax.brandTitle}
                   </h1>
                   <span className="px-2 py-0.5 rounded-full bg-gradient-to-r from-rose-600 to-pink-600 text-white text-[10px] font-black uppercase tracking-wider shadow border border-amber-300/40">
                     Enjoy Bingo · Enjoy Together
                   </span>
                   <span className="px-2 py-0.5 rounded-full bg-emerald-600/35 text-emerald-200 border border-emerald-400/50 text-[10px] font-bold uppercase tracking-wider">
-                    Runde {roundNumber}
+                    {ui.round} {roundNumber}
                   </span>
                 </div>
                 <div className="flex items-center flex-wrap gap-2 mt-1">
                   {hostCode && (
                     showCodeOnBigScreen ? (
                       <span className="px-2 py-0.5 rounded-md bg-cyan-950/90 border border-cyan-400/60 text-cyan-200 text-[11px] font-mono font-bold flex items-center gap-1.5">
-                        <span>📡 Kode:</span>
+                        <span>📡 {ui.code}:</span>
                         <span className="text-white font-black tracking-widest">{hostCode}</span>
                       </span>
                     ) : (
                       <span className="px-2 py-0.5 rounded-md bg-black/70 border border-white/20 text-slate-300 text-[11px] font-bold flex items-center gap-1">
-                        <span>🔒 Kode skjult</span>
+                        <span>🔒 {ui.codeHidden}</span>
                       </span>
                     )
                   )}
@@ -328,7 +350,7 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
                     </span>
                   )}
                   <span className="px-2 py-0.5 rounded-md bg-emerald-950/80 border border-emerald-400/40 text-emerald-200 text-[11px] font-black flex items-center gap-1">
-                    <span>👥 {players.length + remotePlayers.length} spillere</span>
+                    <span>👥 {players.length + remotePlayers.length} {ui.players}</span>
                   </span>
                 </div>
               </div>
@@ -338,7 +360,7 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
 
             {/* View Mode Navigation */}
             <nav
-              aria-label="Storskjermvisninger"
+              aria-label={ax.navAriaLabel}
               className="flex items-center gap-1 p-1 bg-black/60 border border-amber-500/30 rounded-xl overflow-x-auto no-scrollbar max-w-full shrink-0"
             >
               <button
@@ -353,7 +375,7 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
                 }`}
               >
                 <span>🏆</span>
-                <span>Storskjerm ({players.length + remotePlayers.length})</span>
+                <span>{ui.audienceTabMain} ({players.length + remotePlayers.length})</span>
               </button>
 
               <button
@@ -371,7 +393,7 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
                 }`}
               >
                 <span>🎵</span>
-                <span>Musikkbingo (50+)</span>
+                <span>{ui.audienceTabMusic}</span>
               </button>
 
               <button
@@ -385,7 +407,7 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
                     : 'text-amber-200/75 hover:text-amber-100'
                 }`}
               >
-                Big Screen Split
+                {ui.audienceTabSplit}
               </button>
 
               <button
@@ -399,7 +421,7 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
                     : 'text-amber-200/75 hover:text-amber-100'
                 }`}
               >
-                75-Flashboard
+                {ui.audienceTabFlashboard}
               </button>
 
               <button
@@ -413,7 +435,7 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
                     : 'text-amber-200/75 hover:text-amber-100'
                 }`}
               >
-                Fortellinger
+                {ui.audienceTabStories}
               </button>
 
               <button
@@ -427,7 +449,7 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
                     : 'text-amber-200/75 hover:text-amber-100'
                 }`}
               >
-                Stilling
+                {ui.audienceTabLeaderboard}
               </button>
             </nav>
           </div>
@@ -446,10 +468,10 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
                     ? 'bg-cyan-500/25 border-cyan-400 text-cyan-100'
                     : 'bg-black/60 border-white/20 text-slate-200 hover:border-amber-400'
                 }`}
-                title="Deltakerkoden er åpen for alle skjermer som standard (arrangørens private innlogging og fasiter er alltid skjult)"
+                title={ax.showCodeTitle}
               >
                 <span>{showCodeOnBigScreen ? '📡' : '🔒'}</span>
-                <span>{showCodeOnBigScreen ? 'Kode på TV: PÅ' : 'Vis kode'}</span>
+                <span>{showCodeOnBigScreen ? ui.audienceCodeOnTvOn : ui.audienceShowCode}</span>
               </button>
             )}
 
@@ -464,10 +486,10 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
                   setTimeout(() => setCopiedTvLink(false), 2200);
                 }}
                 className="px-2.5 py-1.5 rounded-xl bg-purple-500/25 hover:bg-purple-500/35 border border-purple-400/50 text-purple-100 text-xs font-bold cursor-pointer flex items-center gap-1.5 shadow whitespace-nowrap"
-                title="Kopier ren TV / Prosjektor-lenke uten vertskontroller"
+                title={ax.tvLinkTitle}
               >
                 <span>📺</span>
-                <span>{copiedTvLink ? '✓ Kopiert!' : 'TV-lenke'}</span>
+                <span>{copiedTvLink ? `✓ ${ui.copied}` : ui.audienceTvLink}</span>
               </button>
             )}
 
@@ -480,10 +502,10 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
                   onOpenTvMode('bingo', hostCode);
                 }}
                 className="px-2.5 py-1.5 rounded-xl bg-emerald-500/25 hover:bg-emerald-500/35 border border-emerald-400/50 text-emerald-100 text-xs font-bold cursor-pointer flex items-center gap-1.5 shadow whitespace-nowrap"
-                title="Åpne ren TV-visning uten vertsknapper"
+                title={ax.cleanTvTitle}
               >
                 <span>🖥️</span>
-                <span className="hidden sm:inline">Ren TV</span>
+                <span className="hidden sm:inline">{ui.audienceCleanTv}</span>
               </button>
             )}
 
@@ -503,10 +525,10 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
                     ? 'bg-emerald-500/25 border-emerald-400 text-emerald-100'
                     : 'bg-amber-950/80 border-amber-400/50 text-amber-200 hover:border-amber-300'
                 }`}
-                title="Lås trekning på storskjermen så bare arrangørens styringsenhet kan trekke kuler"
+                title={ax.lockScreenTitle}
               >
                 <span>{isAudienceScreenLocked ? '🔒' : '🔓'}</span>
-                <span>{isAudienceScreenLocked ? 'Skjerm Låst' : 'Lås skjerm'}</span>
+                <span>{isAudienceScreenLocked ? ui.audienceScreenLocked : ui.audienceLockScreen}</span>
               </button>
             )}
 
@@ -519,10 +541,10 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
                   onOpenRemoteBingo();
                 }}
                 className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-500 hover:brightness-110 text-slate-950 text-xs font-black cursor-pointer flex items-center gap-1.5 shadow whitespace-nowrap"
-                title="Bytt fritt til Avstandsbingo uten ny betaling eller innlogging"
+                title={ax.remoteBingoTitle}
               >
                 <span>📡</span>
-                <span>Avstandsbingo</span>
+                <span>{ax.remoteBingoBtn}</span>
               </button>
             )}
 
@@ -535,10 +557,10 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
                   onOpenQuiz('senior', canActAsHost ? 'host' : 'join');
                 }}
                 className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-amber-300 to-emerald-400 hover:brightness-110 text-slate-950 text-xs font-black cursor-pointer flex items-center gap-1.5 shadow whitespace-nowrap"
-                title="Åpne blandet Musikk-gjetting & Senior Grenland Quiz (tilfeldig rekkefølge, flervalg A–D + Skriv-svar, 4–5 per skjerm)"
+                title={ax.seniorQuizTitle}
               >
                 <span>👵🎵</span>
-                <span>Senior Grenland Quiz</span>
+                <span>{ax.seniorQuizBtn}</span>
               </button>
             )}
 
@@ -550,8 +572,8 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
                 const m = sounds.toggleMute();
                 setIsMuted(m);
               }}
-              aria-label={isMuted ? 'Slå på lyd og stemme' : 'Demp lyd og stemme'}
-              title={isMuted ? 'Slå på opplesing og lyd' : 'Demp opplesing og lyd'}
+              aria-label={isMuted ? ui.unmuteSound : ui.muteSound}
+              title={isMuted ? ui.unmuteSound : ui.muteSound}
               className="px-2.5 py-1.5 rounded-xl bg-amber-950/70 border border-amber-500/30 hover:border-amber-400 text-amber-200 text-xs font-bold cursor-pointer shadow whitespace-nowrap"
             >
               {isMuted ? '🔇' : '🔊'}
@@ -563,7 +585,7 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
             <button
               onClick={toggleFullscreen}
               className="px-3 py-1.5 rounded-xl bg-amber-950/70 border border-amber-500/30 hover:border-amber-400 text-amber-200 text-xs font-semibold cursor-pointer flex items-center gap-1.5 shadow whitespace-nowrap"
-              title="Fullskjerm for prosjektor eller TV"
+              title={ax.fullscreenTitle}
             >
               <svg className="w-4 h-4 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path
@@ -573,7 +595,7 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
                   d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5v-4m0 4h-4m4 0l-5-5"
                 />
               </svg>
-              <span>{isFullscreen ? 'Lukk Fullskjerm' : 'Fullskjerm TV'}</span>
+              <span>{isFullscreen ? ui.exitFullscreen : ui.fullscreen}</span>
             </button>
 
             <button
@@ -582,7 +604,7 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
                 onClose();
               }}
               className="p-1.5 rounded-xl text-amber-300 hover:text-amber-100 hover:bg-amber-900/40 cursor-pointer"
-              title="Lukk storskjerm"
+              title={ax.closeBigScreenTitle}
             >
               <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -615,18 +637,18 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
               : /3\s*\.?\s*rekke/i.test(activeClaim.pattern)
               ? 'line3'
               : 'line1');
-          const tierText = tier === 'fullbrett' ? 'FULLT BRETT' : tier === 'line3' ? '3. REKKER' : '1. REKKE';
+          const tierText = formatMilestoneLabel(tier, lang).toUpperCase();
           const nextText =
             tier === 'fullbrett'
-              ? '🔄 Ny runde starter straks!'
+              ? `🔄 ${ui.newRoundStartsSoon}`
               : tier === 'line3'
-              ? '➡️ Vi spiller videre til FULL BRETT!'
-              : '➡️ Vi spiller videre til 3. REKKER!';
+              ? `➡️ ${ui.continuesToFullbrett}`
+              : `➡️ ${ui.continuesToLine3}`;
           return (
             <div className="p-4 rounded-2xl bg-gradient-to-r from-amber-500 via-rose-500 to-amber-500 text-white shadow-2xl border-2 border-white flex flex-wrap items-center justify-between gap-3">
               <div className="space-y-0.5">
                 <div className="font-heading font-black text-base sm:text-xl">
-                  🏆 {activeClaim.playerName.toUpperCase()} HAR FYLT {tierText} OG TRYKKET BINGO!
+                  🏆 {activeClaim.playerName.toUpperCase()} {ui.shoutedBannerPrefix} {tierText} {ui.shoutedBannerMid} {ui.shoutedBannerSuffix}
                 </div>
                 <div className="text-xs sm:text-sm font-black text-amber-50">
                   {nextText}
@@ -642,7 +664,7 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
                     }}
                     className="px-4 py-2 rounded-xl bg-white text-slate-950 font-black text-xs cursor-pointer shadow"
                   >
-                    🔄 Start ny runde nå
+                    🔄 {ui.claimModalStartNewRoundNow}
                   </button>
                 )}
                 <button
@@ -650,7 +672,7 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
                   onClick={() => setActiveClaim(null)}
                   className="px-3 py-2 rounded-xl bg-black/40 hover:bg-black/60 text-white font-black text-xs cursor-pointer"
                 >
-                  OK
+                  {ui.ok}
                 </button>
               </div>
             </div>
@@ -661,7 +683,7 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-xs font-black uppercase tracking-wider text-amber-300 flex items-center gap-1.5">
               <span>👥</span>
-              <span>Deltakere som spiller sammen ({players.length + remotePlayers.length}):</span>
+              <span>{ui.audienceParticipantsBar} ({players.length + remotePlayers.length}):</span>
             </span>
             {players.map((p) => (
               <span
@@ -700,9 +722,9 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
                 onStartNewRound();
               }}
               className="px-3 py-1 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/35 border border-emerald-400/50 text-emerald-100 text-[11px] font-black cursor-pointer shrink-0"
-              title="Start en ny bingorunde for hele salen og alle mobiler (beholder romkode og deltakere)"
+              title={ax.newRoundBtnTitle}
             >
-              🔄 Ny runde (Runde {roundNumber})
+              🔄 {ui.audienceNewRoundBtn} ({ui.round} {roundNumber})
             </button>
           )}
         </div>
@@ -715,10 +737,10 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
           .reverse()
           .map((id) => MUSIC_BINGO_SONGS.find((s) => s.id === id))
           .filter((s): s is MusicBingoSong => Boolean(s));
-        const categories = ['Alle', ...Array.from(new Set(MUSIC_BINGO_SONGS.map((s) => s.category)))];
+        const categories = ['ALL', ...Array.from(new Set(MUSIC_BINGO_SONGS.map((s) => s.category)))];
         const searchLower = musicSearch.trim().toLowerCase();
         const filteredDeck = MUSIC_BINGO_SONGS.filter((s) => {
-          if (musicCategoryFilter !== 'Alle' && s.category !== musicCategoryFilter) return false;
+          if (musicCategoryFilter !== 'ALL' && s.category !== musicCategoryFilter) return false;
           if (!searchLower) return true;
           return (
             s.title.toLowerCase().includes(searchLower) ||
@@ -742,25 +764,25 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
                 <div className="flex items-start justify-between gap-2">
                   <div>
                     <div className="text-xs font-black uppercase tracking-wider text-amber-300">
-                      🎵 Digital Musikkbingo · Runde {musicSnap.roundNumber}
+                      🎵 {ui.musicTitle} · {ui.round} {musicSnap.roundNumber}
                     </div>
                     <h2 className="font-heading font-black text-base sm:text-lg text-white">
-                      Eldre &amp; Stor Sal (50+ personer)
+                      {ui.audienceMusicHallCardTitle}
                     </h2>
                   </div>
                   {effectiveRoomCode && (
                     <span className="px-2.5 py-1 rounded-xl bg-cyan-950 border border-cyan-400/60 text-cyan-200 font-mono font-black text-xs shrink-0">
-                      Kode: {effectiveRoomCode}
+                      {ui.code}: {effectiveRoomCode}
                     </span>
                   )}
                 </div>
 
                 <div className="p-3 rounded-xl bg-black/55 border border-amber-500/25 text-xs text-amber-100/90 space-y-1.5 leading-relaxed">
                   <div>
-                    🔊 <strong>Stor sal (50+ stk):</strong> Koble PC eller nettbrett til salens høyttalere/lydanlegg, og styr alle lydklipp (20, 30, 60 eller 90 sek) direkte i appen via lydfil-knappene under.
+                    🔊 <strong>{ax.musicHallGuideSpeakers}</strong> {ax.musicHallGuideSpeakersDesc}
                   </div>
                   <div>
-                    💻 <strong>Videosamtale:</strong> Spill lydklippene direkte her inne i appen gjennom PC-ens lyd/høyttaler (eller velg nettleserfane-deling hvis videosamtalen din støtter fane-lyd).
+                    💻 <strong>{ax.musicHallGuideVideo}</strong> {ax.musicHallGuideVideoDesc}
                   </div>
                 </div>
 
@@ -776,7 +798,7 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
                       className="min-h-[44px] px-3 py-2 rounded-xl bg-white hover:bg-amber-100 text-slate-950 font-black text-xs cursor-pointer shadow flex items-center justify-center gap-1.5"
                     >
                       <span>🖨️</span>
-                      <span>Skriv ut 50–100 brett</span>
+                      <span>{ui.audiencePrint50Btn}</span>
                     </button>
                   )}
 
@@ -793,7 +815,7 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
                       className="min-h-[44px] px-3 py-2 rounded-xl bg-cyan-500/25 hover:bg-cyan-500/35 border border-cyan-400/60 text-cyan-100 font-black text-xs cursor-pointer flex items-center justify-center gap-1.5"
                     >
                       <span>📱</span>
-                      <span>{copiedMusicJoinLink ? '✓ Lenke kopiert!' : 'Lenke til digitale brett'}</span>
+                      <span>{copiedMusicJoinLink ? `✓ ${ui.copiedLink}` : ui.audienceMusicLinkBtn}</span>
                     </button>
                   )}
                 </div>
@@ -809,7 +831,7 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
                     className="w-full min-h-[44px] px-3 py-2 rounded-xl bg-gradient-to-r from-amber-400/20 to-emerald-400/20 hover:from-amber-400/30 hover:to-emerald-400/30 border border-amber-400/50 text-amber-100 font-black text-xs cursor-pointer flex items-center justify-center gap-2"
                   >
                     <span>👵🎵</span>
-                    <span>Spill blandet Musikk-gjetting + Senior Grenland Quiz (A–D &amp; Skriv-svar)</span>
+                    <span>{ax.musicSeniorQuizBtn}</span>
                     <span>➔</span>
                   </button>
                 )}
@@ -848,14 +870,12 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
                       e.target.value = '';
                       if (res.matched.length > 0) {
                         setBulkMatchMessage(
-                          `✓ Koblet ${res.matched.length} lydfil(er) til sanger i appen${
-                            res.unmatched.length > 0 ? ` (${res.unmatched.length} kunne ikke gjenkjennes automatisk — velg sangen manuelt med «📁 Lydfil»)` : '!'
+                          `${ax.bulkMatchPrefix} ${res.matched.length} ${ax.bulkMatchSuffix}${
+                            res.unmatched.length > 0 ? ` (${res.unmatched.length} ${ax.bulkMatchUnmatchedSuffix})` : ''
                           }`
                         );
                       } else {
-                        setBulkMatchMessage(
-                          'Fant ingen direkte tittel-treff i filnavnet. Klikk «📁 Lydfil» direkte på ønsket sang under for å knytte lydfilen.'
-                        );
+                        setBulkMatchMessage(ax.bulkMatchNone);
                       }
                       setTimeout(() => setBulkMatchMessage(null), 6500);
                     }}
@@ -880,7 +900,7 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
                   >
                     <span>🎲</span>
                     <span>
-                      Trekk &amp; spill neste sang ({MUSIC_BINGO_SONGS.length - musicSnap.playedSongIds.length} igjen av {MUSIC_BINGO_SONGS.length})
+                      {ui.audienceDrawRandomSong} ({MUSIC_BINGO_SONGS.length - musicSnap.playedSongIds.length} {ax.musicDrawLeftOf} {MUSIC_BINGO_SONGS.length})
                     </span>
                   </button>
 
@@ -922,10 +942,10 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
                             <span>{isThisLoading ? '⏳' : isThisPlaying ? '⏸️' : '▶️'}</span>
                             <span className="truncate">
                               {isThisLoading
-                                ? 'Laster lydklipp...'
+                                ? ax.loadingClip
                                 : isThisPlaying
-                                ? `Pause klipp: «${currentSong.title}»`
-                                : `Spill klipp i appen: «${currentSong.title}»`}
+                                ? `${ax.pauseClipPrefix} «${currentSong.title}»`
+                                : `${ax.playClipPrefix} «${currentSong.title}»`}
                             </span>
                           </button>
 
@@ -934,14 +954,14 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
                               type="button"
                               onClick={() => musicClipPlayer.stop()}
                               className="min-h-[44px] px-3 rounded-xl bg-rose-500/25 hover:bg-rose-500/40 border border-rose-400/50 text-rose-100 font-black text-xs cursor-pointer"
-                              title="Stopp lydavspilling"
+                              title={ax.stopPlaybackTitle}
                             >
-                              ⏹️ Stopp
+                              ⏹️ {ui.audienceStopClip}
                             </button>
                           )}
                         </div>
 
-                        {/* Progress + Volume */}
+                            {/* Progress + Volume */}
                         {clipPlayer.currentSongId === currentSong.id && clipPlayer.durationSec > 0 && (
                           <div className="space-y-1">
                             <input
@@ -951,10 +971,10 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
                               value={Math.floor(clipPlayer.currentTimeSec)}
                               onChange={(e) => musicClipPlayer.seekTo(Number(e.target.value))}
                               className="w-full accent-emerald-400 cursor-pointer h-1.5"
-                              aria-label="Spol i lydklipp"
+                              aria-label={ax.seekClipAria}
                             />
                             <div className="flex items-center justify-between text-[11px] font-mono text-emerald-200/90">
-                              <span>{clipPlayer.sourceLabel || 'Lydklipp'}</span>
+                              <span>{clipPlayer.sourceLabel || ax.clipDefaultLabel}</span>
                               <span>
                                 {fmtSec(clipPlayer.currentTimeSec)} / {fmtSec(clipPlayer.durationSec)} ({Math.round(audioPct)}%)
                               </span>
@@ -973,7 +993,7 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
                               value={Math.round(clipPlayer.volume * 100)}
                               onChange={(e) => musicClipPlayer.setVolume(Number(e.target.value) / 100)}
                               className="w-20 accent-amber-400 cursor-pointer h-1.5"
-                              title={`Lydstyrke: ${Math.round(clipPlayer.volume * 100)}%`}
+                              title={`${ax.volumeLabel} ${Math.round(clipPlayer.volume * 100)}%`}
                             />
                             <span className="text-[11px] font-mono text-amber-200/80 w-8">
                               {Math.round(clipPlayer.volume * 100)}%
@@ -988,9 +1008,9 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
                                 singleSongFileInputRef.current?.click();
                               }}
                               className="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 border border-white/20 text-[11px] font-bold text-amber-100 cursor-pointer"
-                              title="Last opp din egen MP3/M4A/WAV-lydfil til denne sangen"
+                              title={ax.uploadSongAudioTitle}
                             >
-                              📁 {customClip ? 'Bytt lydfil' : 'Last opp egen lydfil'}
+                              📁 {customClip ? ax.replaceAudioBtn : ax.uploadAudioBtn}
                             </button>
 
                             {customClip && (
@@ -1002,15 +1022,15 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
                                     void musicClipPlayer.setSongStartOffset(currentSong.id, nextOffset);
                                   }}
                                   className="px-2 py-1 rounded-lg bg-cyan-500/20 border border-cyan-400/40 text-cyan-200 text-[11px] font-mono font-bold cursor-pointer"
-                                  title="Juster startpunkt i egen lydfil (hopp til refreng)"
+                                  title={ax.startOffsetTitle}
                                 >
-                                  ⏩ Start: {customClip.startOffsetSec}s
+                                  ⏩ {ax.startOffsetLabel} {customClip.startOffsetSec}s
                                 </button>
                                 <button
                                   type="button"
                                   onClick={() => void musicClipPlayer.removeSongAudioFile(currentSong.id)}
                                   className="px-2 py-1 rounded-lg bg-rose-500/20 border border-rose-400/40 text-rose-200 text-[11px] font-bold cursor-pointer"
-                                  title="Fjern egen lydfil"
+                                  title={ax.removeCustomAudioTitle}
                                 >
                                   🗑️
                                 </button>
@@ -1038,7 +1058,7 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
                   {/* Clip duration & Timer controls */}
                   <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
                     <div className="flex items-center gap-1">
-                      <span className="text-[11px] font-bold text-amber-300/80 mr-1">Klipp:</span>
+                      <span className="text-[11px] font-bold text-amber-300/80 mr-1">{ax.clipDurationLabel}</span>
                       {[20, 30, 60, 90].map((sec) => (
                         <button
                           key={sec}
@@ -1070,7 +1090,7 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
                         }}
                         className="px-3 py-1.5 rounded-lg bg-emerald-500/25 hover:bg-emerald-500/35 border border-emerald-400/50 text-emerald-100 text-xs font-bold cursor-pointer"
                       >
-                        ⏱️ Start klokka
+                        ⏱️ {ax.startClockBtn}
                       </button>
                       {musicRemainingSec > 0 && (
                         <button
@@ -1105,8 +1125,8 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
                       }`}
                     >
                       {hideMusicTitleUntilReveal
-                        ? '🙈 Gjettemodus PÅ (Skjuler tittel først)'
-                        : '👁️ Viser tittel umiddelbart'}
+                        ? `🙈 ${ax.guessModeOnBtn}`
+                        : `👁️ ${ax.guessModeOffBtn}`}
                     </button>
 
                     <button
@@ -1118,7 +1138,7 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
                       }}
                       className="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 text-xs font-bold text-amber-100 cursor-pointer"
                     >
-                      🔄 Ny Musikkrunde
+                      🔄 {ax.newMusicRoundBtn}
                     </button>
                   </div>
                 </div>
@@ -1130,19 +1150,19 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div>
                       <h3 className="font-heading font-black text-sm text-amber-200">
-                        🎶 Lydfiler &amp; sanger i appen ({filteredDeck.length})
+                        🎶 {ax.audioDeckTitle} ({filteredDeck.length})
                       </h3>
                       <div className="text-[11px] text-amber-200/70">
-                        {Object.keys(clipPlayer.customClips).length}/{MUSIC_BINGO_SONGS.length} egne lydfiler lastet opp · {musicSnap.playedSongIds.length} spilt
+                        {Object.keys(clipPlayer.customClips).length}/{MUSIC_BINGO_SONGS.length} {ax.customFilesUploaded} · {musicSnap.playedSongIds.length} {ax.playedWord}
                       </div>
                     </div>
                     <button
                       type="button"
                       onClick={() => bulkFileInputRef.current?.click()}
                       className="px-2.5 py-1.5 rounded-xl bg-cyan-500/25 hover:bg-cyan-500/35 border border-cyan-400/50 text-cyan-100 font-black text-[11px] cursor-pointer"
-                      title="Last opp flere MP3/M4A/WAV-filer samtidig og koble dem automatisk til sanglisten"
+                      title={ax.bulkUploadTitle}
                     >
-                      📂 Last opp egne lydfiler
+                      📂 {ax.bulkUploadBtn}
                     </button>
                   </div>
 
@@ -1156,7 +1176,7 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
                     type="text"
                     value={musicSearch}
                     onChange={(e) => setMusicSearch(e.target.value)}
-                    placeholder="Søk etter sang, artist eller tiår (f.eks. Prøysen, 1960)..."
+                    placeholder={ui.audienceSearchSongPlaceholder}
                     className="w-full px-3 py-2 rounded-xl bg-black/70 border border-white/20 focus:border-amber-400 text-xs text-white outline-none"
                   />
 
@@ -1175,7 +1195,7 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
                             : 'bg-white/5 text-amber-200/80 hover:bg-white/10'
                         }`}
                       >
-                        {cat}
+                        {cat === 'ALL' ? ui.audienceAllCategories : cat}
                       </button>
                     ))}
                   </div>
@@ -1206,7 +1226,7 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
                             <div className="text-[11px] text-amber-200/75 truncate">
                               {song.artist} · {song.decade}
                               {hasCustomAudio && (
-                                <span className="ml-1.5 text-emerald-300 font-bold">· ✓ Egen lydfil</span>
+                                <span className="ml-1.5 text-emerald-300 font-bold">· ✓ {ax.songSubtitleCustom}</span>
                               )}
                             </div>
                           </div>
@@ -1226,11 +1246,11 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
                               }`}
                               title={
                                 hasCustomAudio
-                                  ? `Bytt lydfil (${clipPlayer.customClips[song.id].fileName})`
-                                  : `Last opp lydfil (.mp3/.m4a/.wav) for «${song.title}»`
+                                  ? `${ax.replaceSongAudioTitle} (${clipPlayer.customClips[song.id].fileName})`
+                                  : `${ax.uploadAudioForSongTitle} «${song.title}»`
                               }
                             >
-                              {hasCustomAudio ? '✓ Lyd' : '📁 Lydfil'}
+                              {hasCustomAudio ? ax.hasCustomAudioShort : ax.audioFileBtnShort}
                             </button>
 
                             <button
@@ -1251,7 +1271,7 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
                                   : 'bg-amber-400 hover:bg-amber-300 text-slate-950'
                               }`}
                             >
-                              {isSongLoading ? '⏳' : isSongPlaying ? '⏸️ Pause' : '▶ Spill'}
+                              {isSongLoading ? '⏳' : isSongPlaying ? ax.pauseShort : ax.playShort}
                             </button>
                           </div>
                         </div>
@@ -1266,21 +1286,22 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
             <div className="flex-1 min-w-0 w-full space-y-5">
               {/* Live Music Bingo Claim Alert */}
               {musicSnap.lastClaim && (() => {
-                const isFull = /fullt?\s*brett|full_?house|blackout/i.test(musicSnap.lastClaim.pattern);
-                const isLine3 = !isFull && /3\s*\.?\s*rekke/i.test(musicSnap.lastClaim.pattern);
+                const isFull = /fullt?\s*brett|fullbrett|full_?house|blackout/i.test(musicSnap.lastClaim.pattern);
+                const isLine3 = !isFull && /3\s*\.?\s*rekke|3\s*lines|line3/i.test(musicSnap.lastClaim.pattern);
                 const nextMusicText = isFull
-                  ? '🔄 Fullt brett oppnådd — arrangør kan starte ny musikkrunde!'
+                  ? ax.musicClaimFullDone
                   : isLine3
-                  ? '➡️ Spillet fortsetter nå til FULLT BRETT!'
-                  : '➡️ Spillet fortsetter nå til 3. REKKER!';
+                  ? `➡️ ${ui.continuesToFullbrett}`
+                  : `➡️ ${ui.continuesToLine3}`;
+                const localizedPattern = localizeBingoPattern(musicSnap.lastClaim.pattern, lang);
                 return (
                   <div className="p-5 rounded-3xl bg-gradient-to-r from-emerald-500 via-amber-400 to-rose-500 text-slate-950 shadow-2xl border-4 border-white flex flex-wrap items-center justify-between gap-3">
                     <div>
                       <div className="text-xs font-black uppercase tracking-widest">
-                        🎉 BEKREFTET MUSIKKBINGO FRA SALEN / MOBIL!
+                        {ax.musicClaimBadge}
                       </div>
                       <div className="font-display text-2xl sm:text-4xl font-black">
-                        {musicSnap.lastClaim.playerName} har fylt {musicSnap.lastClaim.pattern} og trykket BINGO!
+                        {musicSnap.lastClaim.playerName} {ui.shoutedBannerPrefix} {localizedPattern} {ui.shoutedBannerMid} {ui.shoutedBannerSuffix}
                       </div>
                       <div className="text-xs sm:text-sm font-black mt-1">
                         {nextMusicText}
@@ -1292,7 +1313,7 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
                         onClick={() => musicBingoService.dismissClaim()}
                         className="px-4 py-2 rounded-xl bg-slate-950 text-white font-black text-xs cursor-pointer"
                       >
-                        ✓ Godkjenn &amp; lukk varsel
+                        {ax.musicClaimApproveClose}
                       </button>
                     )}
                   </div>
@@ -1304,10 +1325,10 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
                 <div className="flex flex-wrap items-center justify-between gap-3 border-b border-amber-500/20 pb-4">
                   <div className="flex items-center gap-2.5">
                     <span className="px-3 py-1 rounded-full bg-amber-400 text-slate-950 font-black text-xs uppercase tracking-wider">
-                      🎵 Musikkbingo Storskjerm
+                      {ax.musicStageBadge}
                     </span>
                     <span className="text-sm font-bold text-amber-200">
-                      Runde {musicSnap.roundNumber} · {musicSnap.playedSongIds.length} av {MUSIC_BINGO_SONGS.length} sanger spilt
+                      {ui.round} {musicSnap.roundNumber} · {musicSnap.playedSongIds.length} {ax.cardOfTotal} {MUSIC_BINGO_SONGS.length} {ax.musicPlayedOfSongs}
                     </span>
                   </div>
 
@@ -1339,24 +1360,24 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
                   <div className="py-10 text-center space-y-4">
                     <div className="text-6xl">🎶</div>
                     <h2 className="font-display text-3xl sm:text-5xl font-black text-amber-100 leading-tight">
-                      Velkommen til Musikkbingo!
+                      {ax.musicWelcomeTitle}
                     </h2>
                     <p className="text-base sm:text-xl text-amber-200/85 max-w-2xl mx-auto leading-relaxed">
-                      Finn frem papirbrettet eller det digitale brettet på mobil/nettbrett. Når du hører en melodi du kjenner igjen, krysser du av ruten!
+                      {ax.musicWelcomeDesc}
                     </p>
                   </div>
                 ) : !musicSnap.revealCurrentSong ? (
                   <div className="py-8 text-center space-y-5">
                     <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-emerald-500/20 border border-emerald-400 text-emerald-200 text-sm font-black">
                       <span>🔊</span>
-                      <span>LYD-KLIPP SPILLES NÅ — LYTT &amp; KRYSS AV!</span>
+                      <span>{ax.musicPlayingNowBanner}</span>
                     </div>
                     <h2 className="font-display text-3xl sm:text-5xl font-black text-white leading-tight">
-                      Kjenner du igjen denne låten?
+                      {ax.musicDoYouRecognize}
                     </h2>
                     <div className="p-4 sm:p-5 rounded-2xl bg-black/50 border border-amber-400/40 max-w-2xl mx-auto space-y-1.5">
                       <div className="text-sm font-black text-amber-300 uppercase tracking-wider">
-                        Hint til salen: {currentSong.decade} · {currentSong.category}
+                        {ax.musicHintToHall} {currentSong.decade} · {currentSong.category}
                       </div>
                       <p className="text-base sm:text-lg text-amber-100 font-semibold">
                         💡 {currentSong.clipHint}
@@ -1371,14 +1392,14 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
                         }}
                         className="px-7 py-4 rounded-2xl bg-gradient-to-r from-emerald-400 to-amber-400 hover:brightness-110 text-slate-950 font-black text-base sm:text-lg cursor-pointer shadow-2xl"
                       >
-                        👁️ Vis sangtittel &amp; artist på Storskjermen
+                        {ax.musicRevealBtn}
                       </button>
                     )}
                   </div>
                 ) : (
                   <div className="py-6 text-center space-y-4">
                     <div className="text-xs font-black uppercase tracking-widest text-emerald-300">
-                      ✓ NÅ SPILLER / SISTE SANG ({currentSong.decade} · {currentSong.category})
+                      {ax.musicNowPlayingBadge} ({currentSong.decade} · {currentSong.category})
                     </div>
                     <h2 className="font-display text-4xl sm:text-6xl font-black text-white leading-tight">
                       «{currentSong.title}»
@@ -1397,16 +1418,16 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
               <div className="p-5 sm:p-6 rounded-3xl bg-black/60 border border-amber-500/30 space-y-4 shadow-xl">
                 <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/10 pb-3">
                   <h3 className="font-heading font-black text-lg sm:text-xl text-amber-200">
-                    📋 Spilte sanger i denne runden ({playedSongs.length}) — Sjekk brettet ditt
+                    📋 {ui.audiencePlayedSongsTitle} ({playedSongs.length}) {ax.musicPlayedSongsCheck}
                   </h3>
                   <span className="text-xs font-bold text-amber-300/80">
-                    Nyeste sang øverst
+                    {ax.musicNewestTop}
                   </span>
                 </div>
 
                 {playedSongs.length === 0 ? (
                   <div className="py-6 text-center text-sm text-amber-200/60">
-                    Ingen sanger er trukket i runden ennå. Verten starter første melodi straks!
+                    {ui.musicWaitingHost}
                   </div>
                 ) : (
                   <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
@@ -1420,7 +1441,7 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
                           >
                             <div>
                               <div className="text-xs font-black text-amber-300">
-                                🔊 Spilles nå (Gjettes!)
+                                {ax.musicPlayingGuessBadge}
                               </div>
                               <div className="text-base font-bold text-white">
                                 {s.decade} · {s.category}
@@ -1460,7 +1481,7 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
               {musicSnap.participants.length > 0 && (
                 <div className="p-5 rounded-3xl bg-black/55 border border-cyan-500/30 space-y-3">
                   <div className="text-sm font-black text-cyan-200 uppercase tracking-wider">
-                    📱 Digitale deltakerbrett i salen ({musicSnap.participants.length})
+                    {ax.musicDigitalBoardsTitle} ({musicSnap.participants.length})
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
                     {musicSnap.participants.map((p) => (
@@ -1474,7 +1495,7 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
                       >
                         <span className="font-bold text-sm truncate">{p.name}</span>
                         <span className="font-mono font-black text-xs text-amber-300 shrink-0">
-                          {p.hasBingo ? `🏆 ${p.linesCompleted} rekker` : `${p.markedCount}/24 kryss`}
+                          {p.hasBingo ? `🏆 ${p.linesCompleted} ${ax.musicLinesSuffix}` : `${p.markedCount}${ax.musicMarksSuffix}`}
                         </span>
                       </div>
                     ))}
@@ -1506,7 +1527,7 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
                 onRefillDrum={canDrawInStorskjerm ? onRefillDrum : undefined}
                 scrambleTrigger={0}
                 canDraw={canDrawInStorskjerm}
-                readOnlyMessage="🔒 Arrangøren styrer kuletrekningen"
+                readOnlyMessage={`🔒 ${ui.hostControlsNote}`}
                 compactSidebar={false}
                 tumblerSize="tv"
                 layout="stacked"
@@ -1534,16 +1555,16 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
                   <div className="min-w-0 flex-1">
                     <div className="text-[11px] font-black uppercase tracking-wider text-amber-300">
                       {currentBall
-                        ? `Siste Kule #${calledBalls.length}/75`
-                        : 'Klar til trekk'}
+                        ? `${ax.lastBallHash} #${calledBalls.length}/75`
+                        : ax.readyToDraw}
                     </div>
                     <div className="font-heading font-black text-sm text-white leading-snug">
                       {currentBall
                         ? `«${currentBall.affirmation}»`
-                        : 'Trykk Trekk Neste Kule for å starte'}
+                        : ax.pressDrawToStart}
                     </div>
                     <div className="text-[11px] font-mono text-amber-300/75 mt-0.5">
-                      {uncalledBalls.length} kuler igjen
+                      {uncalledBalls.length} {ax.ballsLeft}
                     </div>
                   </div>
                 </div>
@@ -1558,7 +1579,7 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
                       }}
                       className="w-full py-2.5 px-4 bg-gradient-to-r from-emerald-400 via-teal-400 to-amber-400 hover:brightness-110 text-slate-950 font-heading font-black text-xs rounded-xl shadow-lg cursor-pointer"
                     >
-                      🔄 Bland trommelen på nytt (75 kuler)
+                      {ax.refillDrumBtn}
                     </button>
                   ) : (
                     <button
@@ -1567,7 +1588,7 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
                       disabled={uncalledBalls.length === 0}
                       className="w-full py-2.5 px-4 bg-gradient-to-r from-amber-400 to-amber-500 hover:brightness-110 text-slate-950 font-heading font-black text-xs rounded-xl shadow-lg cursor-pointer disabled:opacity-40"
                     >
-                      🎲 Trekk Neste Kule
+                      {ax.drawNextBallBtn}
                     </button>
                   )
                 )}
@@ -1589,13 +1610,13 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
                 }`}
               >
                 <span>🎛️</span>
-                <span>{showBlender ? 'Skjul 3D-trommel' : 'Vis 3D-trommel'}</span>
+                <span>{showBlender ? ax.hideDrumBtn : ax.showDrumBtn}</span>
               </button>
 
               {recentBalls.length > 0 && (
                 <div className="flex items-center gap-1">
                   <span className="text-[10px] uppercase tracking-wider text-amber-400/70 font-bold mr-0.5">
-                    Før:
+                    {ax.previousShort}
                   </span>
                   {recentBalls.slice(0, 4).map((b, idx) => (
                     <div
@@ -1628,7 +1649,7 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
                       : 'bg-black/50 text-amber-200/80 hover:bg-black/70 border border-amber-500/20'
                   }`}
                 >
-                  👥 Vis Alle Spillere ({players.length})
+                  {ax.showAllPlayers} ({players.length})
                 </button>
 
                 {players.map((p, idx) => (
@@ -1660,7 +1681,7 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
               </div>
 
               <div className="text-2xs text-amber-300/70 font-medium">
-                💡 Tips: Hold over en rute for hele ordet · Trykk for å krysse av
+                {ax.tipHoverCell}
               </div>
             </div>
 
@@ -1708,18 +1729,18 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
                         </div>
                         <div className="text-2xs text-amber-300/70">
                           {player.cards.length > 1
-                            ? `Kort ${(player.activeCardIndex || 0) + 1} av ${player.cards.length}`
-                            : 'RIL Bingobrett'}
+                            ? `${ui.cardNumberPrefix}${(player.activeCardIndex || 0) + 1} ${ax.cardOfTotal} ${player.cards.length}`
+                            : ax.rilBoardLabel}
                         </div>
                       </div>
                     </div>
 
                     <div className="text-right">
                       <div className="text-base font-black text-amber-300 tabular-nums">
-                        {player.linesCompleted} {player.linesCompleted === 1 ? 'linje' : 'linjer'}
+                        {player.linesCompleted} {player.linesCompleted === 1 ? ax.lineSingular : ax.linePlural}
                       </div>
                       <div className="text-3xs uppercase tracking-wider text-amber-200/60 font-semibold">
-                        Fullført
+                        {ax.completedLabel}
                       </div>
                     </div>
                   </div>
@@ -1780,7 +1801,7 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
                               <div className="w-full flex items-center justify-between text-3xs font-extrabold">
                                 {cell.isFreeSpace ? (
                                   <span className="w-full text-center text-amber-300 font-black">
-                                    ★ FRI ★
+                                    ★ {ui.freeSpaceLabel} ★
                                   </span>
                                 ) : (
                                   <span
@@ -1800,7 +1821,7 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
                               <div className="my-auto w-full px-0.5">
                                 {cell.isFreeSpace ? (
                                   <div className="text-[10px] sm:text-xs font-black text-amber-200 uppercase tracking-wide leading-tight">
-                                    RIL Livsglede ❤️
+                                    ❤️ {ui.freeSpaceLabel}
                                   </div>
                                 ) : (
                                   <div
@@ -1818,7 +1839,7 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
                               {/* Stamp / Daub Mark */}
                               {cell.isMarked && !cell.isFreeSpace && (
                                 <div className="w-full flex items-center justify-between text-[8px] text-emerald-200 font-extrabold pt-0.5 border-t border-emerald-400/30">
-                                  <span>❤️ Krysset</span>
+                                  <span>❤️ {ax.markedLabel}</span>
                                   {cell.markedBy && (
                                     <span className="truncate max-w-[50px]">{cell.markedBy}</span>
                                   )}
@@ -1856,6 +1877,7 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
                 onScramble={canDrawInStorskjerm ? onAgitateMix : undefined}
                 onRefillDrum={canDrawInStorskjerm ? onRefillDrum : undefined}
                 canDraw={canDrawInStorskjerm}
+                readOnlyMessage={`🔒 ${ui.hostControlsNote}`}
                 compactSidebar={false}
                 tumblerSize="tv"
                 layout="stacked"
@@ -1865,7 +1887,7 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
             {recentBalls.length > 0 && (
               <div className="w-full p-3 rounded-2xl bg-black/55 border border-amber-400/30 flex items-center justify-center gap-2">
                 <span className="text-3xs uppercase tracking-wider text-amber-400/70 font-semibold">
-                  Forrige:
+                  {ax.previousShort}
                 </span>
                 {recentBalls.map((b, idx) => (
                   <div
@@ -1885,10 +1907,10 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
           <div className="md:col-span-7 flex flex-col p-6 rounded-3xl bg-amber-950/30 border border-amber-500/25">
             <div className="flex items-center justify-between mb-3 pb-2 border-b border-amber-500/15">
               <h2 className="font-heading font-bold text-base text-amber-200">
-                Audience Master Flashboard (1–75)
+                {ax.splitFlashboardTitle}
               </h2>
               <span className="text-2xs font-mono text-amber-400">
-                {calledBalls.length} Trukket / 75 Totalt
+                {calledBalls.length} {ax.drawnOf75Total}
               </span>
             </div>
 
@@ -1939,7 +1961,7 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
             {allStories.length > 0 && (
               <div className="mt-5 pt-3 border-t border-amber-500/15">
                 <span className="text-2xs uppercase tracking-wider text-amber-300/70 font-semibold block mb-2">
-                  Direkte Fortellinger og Koblinger fra Salen:
+                  {ax.recentStoriesHall}
                 </span>
                 <div className="flex gap-2 overflow-x-auto pb-1">
                   {allStories.slice(-4).map((s, idx) => (
@@ -1949,7 +1971,7 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
                     >
                       <div className="font-semibold text-amber-200 truncate">{s.text}</div>
                       <div className="text-3xs text-amber-300/80 mt-0.5">
-                        {s.player} {s.partner ? `sammen med ${s.partner}` : ''}
+                        {s.player} {s.partner ? `${ax.togetherWith} ${s.partner}` : ''}
                       </div>
                     </div>
                   ))}
@@ -1967,17 +1989,17 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
             <div className="flex items-center justify-between mb-6 pb-4 border-b border-amber-500/20">
               <div>
                 <h2 className="font-display text-2xl sm:text-4xl font-black text-amber-200">
-                  Full 75-Ball Flashboard
+                  {ax.fullFlashboardTitle}
                 </h2>
                 <p className="text-xs text-amber-300/70">
-                  Alle trukkede kuler lyser opp i gyldent. Tall 1 til 75.
+                  {ax.fullFlashboardDesc}
                 </p>
               </div>
 
               {currentBall && (
                 <div className="flex items-center gap-3 bg-black/60 px-4 py-2 rounded-2xl border border-amber-400/50">
                   <span className="text-xs uppercase tracking-wider text-amber-300/80 font-semibold">
-                    Siste Kule:
+                    {ax.lastBallLabel}
                   </span>
                   <span
                     className="w-10 h-10 rounded-full flex items-center justify-center text-white font-black text-lg shadow"
@@ -2040,12 +2062,11 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
                   disabled={uncalledBalls.length === 0}
                   className="px-8 py-3.5 bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 text-slate-950 font-heading font-black text-base rounded-2xl shadow-xl transition-all cursor-pointer flex items-center gap-2"
                 >
-                  <span>Trekk Neste Kule</span>
-                  <span>🎲</span>
+                  <span>{ax.drawNextBallBtn}</span>
                 </button>
               ) : (
                 <div className="px-6 py-3 rounded-2xl bg-black/60 border border-amber-500/30 text-amber-200 font-bold text-xs sm:text-sm">
-                  🔒 Arrangøren styrer kuletrekningen
+                  🔒 {ui.hostControlsNote}
                 </div>
               )}
             </div>
@@ -2058,15 +2079,15 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
         <div className="flex-1 max-w-[1880px] mx-auto w-full py-5">
           <div className="p-6 rounded-3xl bg-amber-950/40 border border-amber-500/30">
             <h2 className="font-display text-2xl font-bold text-amber-200 mb-1">
-              Gledeshistorier og Mellommenneskelige Koblinger
+              {ax.storiesTitle}
             </h2>
             <p className="text-xs text-amber-300/70 mb-4">
-              Levende samling av hjertevarme relasjoner registrert av spillerne under spillet
+              {ax.storiesDesc}
             </p>
 
             {allStories.length === 0 ? (
               <div className="py-16 text-center text-amber-300/50 text-sm">
-                Ingen historier er registrert ennå. Spillere legger til historier ved å trykke på rutene på bingobrettet!
+                {ui.audienceStoriesEmpty}
               </div>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -2078,7 +2099,7 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
                     <div className="font-bold text-amber-300 text-sm">{s.text}</div>
                     {s.partner && (
                       <div className="text-amber-200 font-semibold">
-                        {s.player} sammen med <strong className="text-white">{s.partner}</strong>
+                        {s.player} {ax.togetherWith} <strong className="text-white">{s.partner}</strong>
                       </div>
                     )}
                     {s.note && (
@@ -2099,14 +2120,14 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
             <div className="flex flex-wrap items-center justify-between gap-2 mb-6">
               <div>
                 <h2 className="font-display text-2xl sm:text-3xl font-black text-amber-200 mb-1">
-                  Spilloversikt & Stilling ({players.length + remotePlayers.length} spillere)
+                  {ui.audienceLeaderboardTitle} ({players.length + remotePlayers.length} {ui.players})
                 </h2>
                 <p className="text-xs text-amber-300/70">
-                  Alle som deltar sammen i Runde {roundNumber} (lokale brett + mobildeltakere)
+                  {ax.leaderboardDesc} {ui.round} {roundNumber}
                 </p>
               </div>
               <span className="px-3 py-1 rounded-full bg-emerald-500/20 border border-emerald-400/40 text-emerald-200 text-xs font-black">
-                Runde {roundNumber}
+                {ui.round} {roundNumber}
               </span>
             </div>
 
@@ -2118,7 +2139,7 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
                   avatarColor: p.avatarColor,
                   linesCompleted: p.linesCompleted,
                   hasBingo: p.hasBingo,
-                  subtitle: `${p.cards.length} Kort i spill`,
+                  subtitle: `${p.cards.length} ${ui.cards} ${ax.cardsInPlaySuffix}`,
                 })),
                 ...remotePlayers.map((rp) => {
                   const summary = tvPlayersSummary.find((s) => s.id === rp.id);
@@ -2128,7 +2149,7 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
                     avatarColor: rp.color || '#06b6d4',
                     linesCompleted: summary?.linesCompleted || 0,
                     hasBingo: Boolean(summary?.hasBingo),
-                    subtitle: 'Tilkoblet på mobil/nett 📱',
+                    subtitle: ax.connectedMobileLabel,
                   };
                 }),
               ]
@@ -2157,7 +2178,7 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
                           <span>{p.name}</span>
                           {p.hasBingo && (
                             <span className="px-2 py-0.5 rounded-full bg-amber-400 text-slate-950 text-2xs font-black">
-                              BINGO VINNER 🏆
+                              {ax.bingoWinnerBadge}
                             </span>
                           )}
                         </div>
@@ -2173,7 +2194,7 @@ export const AudienceDisplayModal: React.FC<AudienceDisplayModalProps> = ({
                           {p.linesCompleted}
                         </div>
                         <div className="text-3xs uppercase tracking-wider text-amber-200/60">
-                          Linjer
+                          {ax.linesColumnLabel}
                         </div>
                       </div>
                     </div>

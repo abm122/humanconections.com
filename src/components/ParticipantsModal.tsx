@@ -5,6 +5,8 @@
 
 import React, { useState } from 'react';
 import { sounds } from '../audio/soundEngine';
+import { useTranslation } from '../services/i18n';
+import { getBingoUiTexts } from '../services/bingoUiI18n';
 
 interface ParticipantsModalProps {
   isOpen: boolean;
@@ -21,6 +23,8 @@ export const ParticipantsModal: React.FC<ParticipantsModalProps> = ({
   playerNames,
   onUpdatePlayerNames,
 }) => {
+  const { lang } = useTranslation();
+  const ui = getBingoUiTexts(lang);
   const [newName, setNewName] = useState('');
   const [editingIdx, setEditingIdx] = useState<number | null>(null);
   const [editingName, setEditingName] = useState('');
@@ -67,7 +71,7 @@ export const ParticipantsModal: React.FC<ParticipantsModalProps> = ({
     const updated = [...playerNames];
     if (count > updated.length) {
       for (let i = updated.length; i < count; i++) {
-        updated.push(`Spiller ${i + 1}`);
+        updated.push(`${ui.player} ${i + 1}`);
       }
     } else if (count < updated.length) {
       updated.length = count;
@@ -86,10 +90,10 @@ export const ParticipantsModal: React.FC<ParticipantsModalProps> = ({
             </div>
             <div>
               <h2 className="font-heading font-black text-xl text-amber-200">
-                Deltakere & Antall
+                {ui.participantsTitle}
               </h2>
               <p className="text-xs text-amber-300/80">
-                {playerNames.length} {playerNames.length === 1 ? 'deltaker' : 'deltakere'} registrert for runden
+                {playerNames.length} {playerNames.length === 1 ? ui.player.toLowerCase() : ui.participantsCountLabel}
               </p>
             </div>
           </div>
@@ -100,7 +104,7 @@ export const ParticipantsModal: React.FC<ParticipantsModalProps> = ({
               onClose();
             }}
             className="p-2 rounded-xl text-amber-300 hover:text-white hover:bg-amber-900/40 cursor-pointer transition-all"
-            title="Lukk deltakere"
+            title={ui.close}
           >
             ✕
           </button>
@@ -110,10 +114,10 @@ export const ParticipantsModal: React.FC<ParticipantsModalProps> = ({
         <div className="p-4 rounded-2xl bg-black/40 border border-amber-500/25 space-y-2">
           <div className="flex items-center justify-between">
             <label className="text-xs font-bold uppercase tracking-wider text-amber-300">
-              Hurtigvalg antall deltakere:
+              {ui.participantsSubtitle}
             </label>
             <span className="text-xs font-mono font-bold text-amber-400">
-              {playerNames.length} aktive
+              {playerNames.length}
             </span>
           </div>
           <div className="flex flex-wrap gap-1.5">
@@ -128,7 +132,7 @@ export const ParticipantsModal: React.FC<ParticipantsModalProps> = ({
                     : 'bg-amber-950/60 border border-amber-500/30 text-amber-200/80 hover:bg-amber-900/60 hover:text-white'
                 }`}
               >
-                {num} {num === 1 ? 'spiller' : 'spillere'}
+                {num} {num === 1 ? ui.player.toLowerCase() : ui.players}
               </button>
             ))}
           </div>
@@ -140,7 +144,7 @@ export const ParticipantsModal: React.FC<ParticipantsModalProps> = ({
             type="text"
             value={newName}
             onChange={(e) => setNewName(e.target.value)}
-            placeholder="Navn på ny spiller eller lag (f.eks: 'Kari' eller 'Lag Blå')..."
+            placeholder={ui.participantsPlaceholder}
             className="flex-1 px-4 py-3 rounded-xl bg-black/60 border border-amber-500/30 text-amber-100 placeholder-amber-500/40 text-xs sm:text-sm outline-none focus:border-amber-300"
           />
           <button
@@ -148,7 +152,7 @@ export const ParticipantsModal: React.FC<ParticipantsModalProps> = ({
             disabled={!newName.trim()}
             className="px-5 py-3 rounded-xl bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 disabled:opacity-40 text-slate-950 font-heading font-black text-xs sm:text-sm cursor-pointer shadow-md transition-all flex items-center gap-1.5 whitespace-nowrap"
           >
-            <span>+ Legg til</span>
+            <span>+ {ui.participantsAddBtn}</span>
           </button>
         </form>
 
@@ -156,79 +160,81 @@ export const ParticipantsModal: React.FC<ParticipantsModalProps> = ({
         <div className="space-y-2">
           <div className="flex items-center justify-between">
             <h3 className="font-heading font-black text-xs uppercase tracking-wider text-amber-300">
-              Registrerte Spillere ({playerNames.length}):
+              {ui.participantsTitle} ({playerNames.length})
             </h3>
-            <span className="text-2xs text-amber-300/60">Trykk ✎ for å endre navn</span>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-60 overflow-y-auto pr-1">
-            {playerNames.map((name, idx) => (
-              <div
-                key={idx}
-                className="p-2.5 rounded-xl bg-black/50 border border-amber-500/20 flex items-center justify-between gap-2"
-              >
-                <div className="flex items-center gap-2 flex-1 min-w-0">
-                  <span className="w-6 h-6 rounded-lg bg-amber-500/20 text-amber-300 flex items-center justify-center text-xs font-bold shrink-0">
-                    {DEFAULT_AVATARS[idx % DEFAULT_AVATARS.length]}
-                  </span>
+            {playerNames.length === 0 ? (
+              <div className="text-xs text-amber-300/60 col-span-full py-4 text-center">
+                {ui.participantsEmpty}
+              </div>
+            ) : (
+              playerNames.map((name, idx) => (
+                <div
+                  key={idx}
+                  className="p-2.5 rounded-xl bg-black/50 border border-amber-500/20 flex items-center justify-between gap-2"
+                >
+                  <div className="flex items-center gap-2 flex-1 min-w-0">
+                    <span className="w-6 h-6 rounded-lg bg-amber-500/20 text-amber-300 flex items-center justify-center text-xs font-bold shrink-0">
+                      {DEFAULT_AVATARS[idx % DEFAULT_AVATARS.length]}
+                    </span>
 
-                  {editingIdx === idx ? (
-                    <div className="flex items-center gap-1 flex-1">
-                      <input
-                        type="text"
-                        value={editingName}
-                        onChange={(e) => setEditingName(e.target.value)}
-                        onKeyDown={(e) => e.key === 'Enter' && handleSaveEdit(idx)}
-                        className="px-2 py-1 rounded bg-black border border-amber-400 text-xs text-white outline-none w-full"
-                        autoFocus
-                      />
+                    {editingIdx === idx ? (
+                      <div className="flex items-center gap-1 flex-1">
+                        <input
+                          type="text"
+                          value={editingName}
+                          onChange={(e) => setEditingName(e.target.value)}
+                          onKeyDown={(e) => e.key === 'Enter' && handleSaveEdit(idx)}
+                          className="px-2 py-1 rounded bg-black border border-amber-400 text-xs text-white outline-none w-full"
+                          autoFocus
+                        />
+                        <button
+                          type="button"
+                          onClick={() => handleSaveEdit(idx)}
+                          className="px-2 py-1 rounded bg-emerald-500 text-slate-950 text-2xs font-bold cursor-pointer"
+                        >
+                          ✓
+                        </button>
+                      </div>
+                    ) : (
+                      <span className="text-xs font-bold text-amber-100 truncate">
+                        {name}
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-1 shrink-0">
+                    {editingIdx !== idx && (
                       <button
                         type="button"
-                        onClick={() => handleSaveEdit(idx)}
-                        className="px-2 py-1 rounded bg-emerald-500 text-slate-950 text-2xs font-bold cursor-pointer"
+                        onClick={() => handleStartEditing(idx, name)}
+                        className="p-1 rounded text-amber-400/80 hover:text-amber-200 text-2xs cursor-pointer"
+                        title={name}
                       >
-                        ✓
+                        ✎
                       </button>
-                    </div>
-                  ) : (
-                    <span className="text-xs font-bold text-amber-100 truncate">
-                      {name}
-                    </span>
-                  )}
+                    )}
+                    {playerNames.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => handleRemovePlayer(idx)}
+                        className="p-1 rounded text-rose-400/80 hover:text-rose-200 text-2xs cursor-pointer"
+                        title={ui.participantsRemove}
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
                 </div>
-
-                <div className="flex items-center gap-1 shrink-0">
-                  {editingIdx !== idx && (
-                    <button
-                      type="button"
-                      onClick={() => handleStartEditing(idx, name)}
-                      className="p-1 rounded text-amber-400/80 hover:text-amber-200 text-2xs cursor-pointer"
-                      title="Rediger navn"
-                    >
-                      ✎
-                    </button>
-                  )}
-                  {playerNames.length > 1 && (
-                    <button
-                      type="button"
-                      onClick={() => handleRemovePlayer(idx)}
-                      className="p-1 rounded text-rose-400/80 hover:text-rose-200 text-2xs cursor-pointer"
-                      title="Fjern spiller"
-                    >
-                      ✕
-                    </button>
-                  )}
-                </div>
-              </div>
-            ))}
+              ))
+            )}
           </div>
         </div>
 
         {/* Footer */}
-        <div className="pt-2 border-t border-amber-500/20 flex items-center justify-between">
-          <div className="text-2xs text-amber-300/70">
-            Endringer oppdateres automatisk for neste bingorunde.
-          </div>
+        <div className="pt-2 border-t border-amber-500/20 flex items-center justify-end">
           <button
             type="button"
             onClick={() => {
@@ -237,7 +243,7 @@ export const ParticipantsModal: React.FC<ParticipantsModalProps> = ({
             }}
             className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 text-slate-950 font-heading font-black text-xs cursor-pointer shadow-md transition-all"
           >
-            Ferdig ✓
+            {ui.ok} ✓
           </button>
         </div>
       </div>

@@ -9,6 +9,8 @@ import type { QuizEdition } from '../data/quizQuestions';
 import { sounds } from '../audio/soundEngine';
 import { useTranslation } from '../services/i18n';
 import { getTitleScreenTexts } from '../services/titleScreenI18n';
+import { getBingoUiTexts } from '../services/bingoUiI18n';
+import { getTitleExtraTexts } from '../services/titleExtraI18n';
 import { LanguageSelector } from './LanguageSelector';
 import { GoldenCoinLogo } from './GoldenCoinLogo';
 import { BallCageCanvas } from './BallCageCanvas';
@@ -92,6 +94,8 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
 }) => {
   const { t, lang } = useTranslation();
   const ts = getTitleScreenTexts(lang);
+  const ui = getBingoUiTexts(lang);
+  const tx = getTitleExtraTexts(lang);
   const [quickJoinCode, setQuickJoinCode] = useState<string>('');
   const [activeHostCode, setActiveHostCode] = useState<string>(() => remoteBingo.getHostCode());
   const [isServerActive, setIsServerActive] = useState<boolean>(() => remoteBingo.isRoomActiveOnServer());
@@ -152,7 +156,7 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
     const updated = [...current];
     if (clamped > updated.length) {
       for (let i = updated.length; i < clamped; i++) {
-        updated.push(DEFAULT_NAMES[i % DEFAULT_NAMES.length] || `Spiller ${i + 1}`);
+        updated.push(DEFAULT_NAMES[i % DEFAULT_NAMES.length] || `${ui.player} ${i + 1}`);
       }
     } else if (clamped < updated.length) {
       updated.length = clamped;
@@ -598,7 +602,7 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
     } else {
       setOwnerEditFeedback({
         type: 'error',
-        text: res.error || 'Kunne ikke lagre oppsettet.',
+        text: res.error || tx.saveErrorFallback,
       });
     }
   };
@@ -607,7 +611,7 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
     sounds.playClick();
     const activated = sessionTimer.activateTrialSession(10);
     if (!activated) return;
-    const trialHostName = playerNames[0] || 'Prøvespiller';
+    const trialHostName = playerNames[0] || tx.trialPlayerFallback;
     if (!authService.getCurrentUser().isAuthenticated) {
       authService.loginAsPlayer(trialHostName, '🎮', '#f59e0b');
     }
@@ -781,7 +785,7 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
 
           {/* Primary Game Actions + Quiz & Memory Rullegardin */}
           <nav
-            aria-label="Spillmoduser og kategorier"
+            aria-label={tx.navAriaLabel}
             className="flex flex-wrap items-center gap-1.5"
           >
             {onOpenRemoteBingo && (
@@ -835,10 +839,10 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
                       ? 'bg-purple-400 text-slate-950 border-purple-300 font-black'
                       : 'bg-purple-950/80 border-purple-400/50 text-purple-100 hover:border-purple-300'
                   }`}
-                  title="Velg Quiz eller Memory (VoksenQuiz, FamilieQuiz, JuleQuiz, Memory)"
+                  title={ts.quizAndMemoryTitle}
                 >
                   <span>🎭</span>
-                  <span>Quiz &amp; Memory</span>
+                  <span>{ts.quizAndMemory}</span>
                   <span className="text-[10px]">{isQuizMenuOpen ? '▲' : '▼'}</span>
                 </button>
 
@@ -944,11 +948,11 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
                   ? 'bg-amber-400 text-slate-950 border-amber-300 font-black'
                   : 'bg-black/60 border-amber-500/35 text-amber-200 hover:border-amber-400'
               }`}
-              title="Tilpass skjermstørrelse (Mobil, PC eller TV / Prosjektor)"
+              title={tx.screenSizeMenuTitle}
             >
               <span>{screenDevice === 'mobile' ? '📱' : screenDevice === 'big_screen' ? '📺' : '💻'}</span>
               <span>
-                {screenDevice === 'mobile' ? 'Mobil' : screenDevice === 'big_screen' ? 'TV / Prosjektor' : 'PC'}
+                {screenDevice === 'mobile' ? ts.screenMobileShort : screenDevice === 'big_screen' ? ts.screenBigScreenShort : ts.screenDesktopShort}
               </span>
               <span className="text-[10px]">{isScreenMenuOpen ? '▲' : '▼'}</span>
             </button>
@@ -956,9 +960,9 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
             {isScreenMenuOpen && (
               <div className="absolute right-0 mt-2 w-52 rounded-2xl bg-[#181009] border border-amber-400/50 shadow-2xl p-2 z-50 space-y-1 text-left">
                 {([
-                  { id: 'mobile', icon: '📱', label: 'Mobil (liten skjerm)' },
-                  { id: 'desktop', icon: '💻', label: 'PC / Nettbrett' },
-                  { id: 'big_screen', icon: '📺', label: 'TV / Prosjektor' },
+                  { id: 'mobile', icon: '📱', label: ts.screenMobile.replace(/^📱\s*/, '') },
+                  { id: 'desktop', icon: '💻', label: ts.screenDesktop.replace(/^💻\s*/, '') },
+                  { id: 'big_screen', icon: '📺', label: ts.screenBigScreen.replace(/^📺\s*/, '') },
                 ] as const).map((d) => (
                   <button
                     key={d.id}
@@ -1027,10 +1031,10 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
                   ? 'bg-amber-400 text-slate-950 border-amber-300 font-black'
                   : 'bg-amber-950/70 border-amber-500/35 text-amber-200 hover:border-amber-400'
               }`}
-              title="Verktøy, deltakere, dagsplan og innstillinger"
+              title={ts.toolsBtnTitle}
             >
               <span>⚙️</span>
-              <span>Verktøy</span>
+              <span>{ts.toolsBtn}</span>
               <span className="text-[10px]">{isToolsMenuOpen ? '▲' : '▼'}</span>
             </button>
 
@@ -1228,7 +1232,7 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
                 <span>{ts.ownerEditBannerTitle}</span>
               </div>
               <p className="text-[11px] text-emerald-100/80 mt-0.5">
-                {ts.ownerEditBannerDesc} Bruk ▲ ▼ ⇄ og 📦 på boksene under for å flytte rekkefølge, bytte side eller komprimere som standard.
+                {ts.ownerEditBannerDesc} {tx.ownerEditLayoutHint}
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2 shrink-0">
@@ -1316,8 +1320,8 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
                 { key: 'showReport', label: `💬 ${ts.report}` },
                 { key: 'showPrint', label: `🖨️ ${ts.printCards}` },
                 { key: 'showIosInstall', label: `🍎 ${ts.iosApp}` },
-                { key: 'showDrumOnMobile', label: '📱 3D Trommel mobil' },
-                { key: 'familyKidsMode', label: '🧸 Familie- & Barnemodus' },
+                { key: 'showDrumOnMobile', label: tx.toggleDrumMobile },
+                { key: 'familyKidsMode', label: tx.toggleFamilyKids },
               ].map((mod) => {
                 const active = Boolean(editVisibleModules[mod.key as keyof typeof editVisibleModules]);
                 return (
@@ -1374,15 +1378,15 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
                     : 'bg-black/60 border-emerald-400/40 text-emerald-100 hover:bg-white/10'
                 }`}
               >
-                ⇄ Bytt venstre ↔ høyre kolonne {editLayoutPrefs.swapColumns ? '(Byttet)' : ''}
+                ⇄ {tx.swapColumnsBtn} {editLayoutPrefs.swapColumns ? tx.swappedTag : ''}
               </button>
 
               <div className="flex items-center gap-1 bg-black/50 p-1 rounded-lg border border-emerald-500/30">
-                <span className="text-emerald-200 font-bold px-1">Quiz-størrelse:</span>
+                <span className="text-emerald-200 font-bold px-1">{tx.quizSizeLabel}</span>
                 {[
-                  { id: 'compact' as const, label: '📦 Kompakt' },
-                  { id: 'standard' as const, label: '🪟 Standard' },
-                  { id: 'expanded' as const, label: '⛶ Utvidet' },
+                  { id: 'compact' as const, label: tx.quizCompact },
+                  { id: 'standard' as const, label: tx.quizStandard },
+                  { id: 'expanded' as const, label: tx.quizExpanded },
                 ].map((sz) => (
                   <button
                     key={sz.id}
@@ -1403,11 +1407,11 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
               </div>
 
               <div className="flex items-center gap-1 bg-black/50 p-1 rounded-lg border border-emerald-500/30">
-                <span className="text-emerald-200 font-bold px-1">Quiz-side:</span>
+                <span className="text-emerald-200 font-bold px-1">{tx.quizSideLabel}</span>
                 {[
-                  { id: 'left' as const, label: '⬅️ Venstre' },
-                  { id: 'center' as const, label: '⏺️ Midt' },
-                  { id: 'right' as const, label: '➡️ Høyre' },
+                  { id: 'left' as const, label: tx.sideLeft },
+                  { id: 'center' as const, label: tx.sideCenter },
+                  { id: 'right' as const, label: tx.sideRight },
                 ].map((dk) => (
                   <button
                     key={dk.id}
@@ -1439,7 +1443,7 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
                     : 'bg-black/60 border-emerald-500/30 text-emerald-100 hover:bg-white/10'
                 }`}
               >
-                ⇄ Quiz-kolonner: {editLayoutPrefs.quizSwapColumns ? 'Byttet' : 'Standard'}
+                ⇄ {tx.quizColumnsLabel} {editLayoutPrefs.quizSwapColumns ? tx.swappedTag.replace(/[()]/g, '') : tx.standardTag}
               </button>
             </div>
 
@@ -1448,7 +1452,7 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
               onClick={handleResetLayoutPrefs}
               className="px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-amber-200 font-bold cursor-pointer"
             >
-              ↺ Tilbakestill layout
+              {tx.resetLayoutBtn}
             </button>
           </div>
         </div>
@@ -1461,18 +1465,18 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
           : normalizeLayoutPrefs(ownerProfile.layoutPrefs);
 
         const SECTION_META: Record<string, { label: string; collapsible?: boolean }> = {
-          hero: { label: '🪙 App-logo & Tittel', collapsible: false },
-          host_code: { label: '🔑 Aktiv romkode', collapsible: true },
-          kahoot_join: { label: '🎯 Bli med med kode', collapsible: true },
-          drum: { label: '🎰 Live Bingotrommel', collapsible: true },
-          status_banner: { label: '💳 Status & Spilletid', collapsible: false },
+          hero: { label: tx.secHero, collapsible: false },
+          host_code: { label: tx.secHostCode, collapsible: true },
+          kahoot_join: { label: tx.secKahootJoin, collapsible: true },
+          drum: { label: tx.secDrum, collapsible: true },
+          status_banner: { label: tx.secStatusBanner, collapsible: false },
           category: { label: `📂 ${ts.sec1Title}`, collapsible: true },
           mode: { label: `✨ ${ts.sec2Title}`, collapsible: true },
           card_format: { label: `🌟 ${ts.sec3Title}`, collapsible: true },
           players: { label: `👥 ${ts.sec4Title}`, collapsible: true },
-          cards_screen: { label: '🖥️ Kort & Skjermformat', collapsible: true },
+          cards_screen: { label: tx.secCardsScreen, collapsible: true },
           remote_strip: { label: `📡 ${ts.remoteTitle}`, collapsible: true },
-          start_actions: { label: '▶️ Startknapper', collapsible: false },
+          start_actions: { label: tx.secStartActions, collapsible: false },
         };
 
         const renderWrappedSection = (
@@ -1506,12 +1510,12 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
                     type="button"
                     onClick={() => handleToggleLocalCollapseSection(sectionId)}
                     className="flex items-center gap-1.5 font-bold hover:text-white cursor-pointer truncate"
-                    title={isCollapsed ? 'Utvid seksjon' : 'Komprimer seksjon'}
+                    title={isCollapsed ? tx.expandSectionTitle : tx.collapseSectionTitle}
                   >
                     <span>{isCollapsed ? '▸' : '▾'}</span>
                     <span className="truncate">{meta.label}</span>
                     {isCollapsed && (
-                      <span className="text-[10px] text-amber-300/75 font-normal">(komprimert)</span>
+                      <span className="text-[10px] text-amber-300/75 font-normal">{tx.collapsedTag}</span>
                     )}
                   </button>
 
@@ -1523,7 +1527,7 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
                           disabled={colIdx === 0}
                           onClick={() => handleMoveLayoutSection(sectionId, 'up')}
                           className="px-1.5 py-0.5 rounded bg-white/10 hover:bg-white/20 text-[10px] font-bold disabled:opacity-30 cursor-pointer"
-                          title="Flytt opp"
+                          title={tx.moveUpTitle}
                         >
                           ▲
                         </button>
@@ -1532,7 +1536,7 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
                           disabled={colIdx === colLen - 1}
                           onClick={() => handleMoveLayoutSection(sectionId, 'down')}
                           className="px-1.5 py-0.5 rounded bg-white/10 hover:bg-white/20 text-[10px] font-bold disabled:opacity-30 cursor-pointer"
-                          title="Flytt ned"
+                          title={tx.moveDownTitle}
                         >
                           ▼
                         </button>
@@ -1540,7 +1544,7 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
                           type="button"
                           onClick={() => handleMoveLayoutSection(sectionId, 'swap')}
                           className="px-1.5 py-0.5 rounded bg-amber-400/25 hover:bg-amber-400/40 text-amber-200 text-[10px] font-bold cursor-pointer"
-                          title="Flytt mellom venstre og høyre kolonne"
+                          title={tx.swapColTitle}
                         >
                           ⇄
                         </button>
@@ -1552,9 +1556,9 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
                               ? 'bg-emerald-400 text-slate-950 font-black'
                               : 'bg-white/10 hover:bg-white/20 text-slate-200'
                           }`}
-                          title="Sett om denne boksen skal være komprimert som standard for alle"
+                          title={tx.defaultCollapseTitle}
                         >
-                          📦 {isDefaultCollapsed ? 'Skjult std' : 'Åpen std'}
+                          📦 {isDefaultCollapsed ? tx.hiddenDefaultTag : tx.openDefaultTag}
                         </button>
                       </>
                     )}
@@ -1564,7 +1568,7 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
                         onClick={() => handleToggleLocalCollapseSection(sectionId)}
                         className="px-1.5 py-0.5 rounded bg-white/5 hover:bg-white/15 text-[10px] font-bold text-amber-200/80 cursor-pointer"
                       >
-                        {isCollapsed ? 'Utvid' : 'Minimer'}
+                        {isCollapsed ? tx.expandShort : tx.minimizeShort}
                       </button>
                     )}
                   </div>
@@ -1602,7 +1606,7 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
                 <div className="flex items-center gap-2">
                   <span className="text-lg">🔑</span>
                   <span className="text-xs font-black text-amber-100 uppercase tracking-wider">
-                    Aktiv romkode:
+                    {ts.activeRoomCodeTitle}
                   </span>
                   <span className="px-2.5 py-0.5 rounded-lg bg-black/80 border border-amber-400 font-mono font-black text-base text-amber-300 tracking-widest select-all">
                     {activeHostCode || '----'}
@@ -1610,14 +1614,14 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
                 </div>
                 <span className="text-[11px] font-bold text-emerald-300">
                   {remoteBingo.isCloudRoomSynced()
-                    ? '☁️ Åpen overalt'
+                    ? ts.openEverywhereBadge
                     : isServerActive
-                    ? '🟢 Åpen for mobil & TV'
-                    : '⏳ Aktiverer...'}
+                    ? ts.openForMobileTvBadge
+                    : ts.activatingBadge}
                 </span>
               </div>
               <p className="text-[11px] text-amber-200/80 leading-snug">
-                Romkoden er åpen for alle skjermer slik at alle deltakere kan bli med fritt — fasiter og din private innlogging er skjult.
+                {ts.roomCodeOpenInfo}
               </p>
               <div className="flex flex-wrap items-center gap-1.5">
                 <button
@@ -1633,7 +1637,7 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
                   }}
                   className="px-3 py-1.5 rounded-lg bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-xs cursor-pointer shadow transition-all"
                 >
-                  {copiedHostCode ? '✓ Kopiert!' : '📋 Kopier kode'}
+                  {copiedHostCode ? ts.copiedBtn : ts.copyCodeBtn}
                 </button>
                 <button
                   type="button"
@@ -1649,7 +1653,7 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
                   }}
                   className="px-3 py-1.5 rounded-lg bg-emerald-500/25 hover:bg-emerald-500/35 border border-emerald-400/50 text-emerald-100 font-bold text-xs cursor-pointer transition-all"
                 >
-                  {copiedHostLink ? '✓ Lenke kopiert!' : '🔗 Deltakerlenke'}
+                  {copiedHostLink ? ts.copiedLinkBtn : ts.copyInviteLinkBtn}
                 </button>
                 <button
                   type="button"
@@ -1658,9 +1662,9 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
                     remoteBingo.reactivateCurrentHostCode();
                   }}
                   className="px-2.5 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 border border-white/20 text-amber-200 font-bold text-xs cursor-pointer transition-all"
-                  title="Aktiver arrangementskoden på nytt mot serveren"
+                  title={ts.reactivateCodeBtn}
                 >
-                  🔄 Aktiver
+                  🔄 {ts.reactivateCodeBtn}
                 </button>
               </div>
             </div>
@@ -2336,7 +2340,7 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
                 onClick={() => {
                   sounds.playClick();
                   userEditedSetupRef.current = true;
-                  const updated = [...playerNames, `Spiller ${playerNames.length + 1}`];
+                  const updated = [...playerNames, `${ui.player} ${playerNames.length + 1}`];
                   setPlayerNames(updated);
                   setCustomCountInput(String(updated.length));
                 }}

@@ -33,6 +33,7 @@ export interface HostActivityNotification {
 }
 
 export interface RemoteBingoClaim {
+  claimId?: string;
   userId: string;
   playerName: string;
   pattern: string;
@@ -122,8 +123,12 @@ class RemoteBingoService {
   private tvModeChangeListeners: Set<(game: 'bingo' | 'quiz') => void> = new Set();
   private claimedMilestones: BingoMilestone[] = [];
   private milestoneWinners: Partial<Record<BingoMilestone, string>> = {};
+  private preClaimSnapshot: { claimedMilestones: BingoMilestone[]; milestoneWinners: Partial<Record<BingoMilestone, string>> } | null = null;
   private hostNotifications: HostActivityNotification[] = [];
   private recentActivityKeys: Map<string, number> = new Map();
+  private seenClaimIds: Set<string> = new Set();
+  private claimRejectedListeners: Set<(payload: { message?: string; milestone?: BingoMilestone; claimedMilestones?: BingoMilestone[]; milestoneWinners?: Partial<Record<BingoMilestone, string>> }) => void> = new Set();
+  private statePollTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor() {
     if (typeof window !== 'undefined') {
@@ -346,6 +351,7 @@ class RemoteBingoService {
           roomCode: this.hostCode,
           hostName: this.hostName,
           hostKey,
+          calledBalls: this.mapBallNumbersToCalledBalls(this.calledBallNumbersCache),
         });
         void this.registerRoomOnServer(this.hostCode);
       } else if (this.isRemotePlayer && this.currentRoomCode) {
@@ -446,6 +452,15 @@ class RemoteBingoService {
           String(payload.pattern || ''),
           Boolean(payload.isFullHouse)
         );
+        const dedupKey = String(
+          payload.claimId || `${String(payload.playerName).trim().toLowerCase()}:${tier}:${Number(payload.roundNumber) || this.roundNumber}:${payload.timestamp || ''}`
+        );
+        if (this.seenClaimIds.has(dedupKey)) {
+          return;
+        }
+        this.seenClaimIds.add(dedupKey);
+        this.preClaimSnapshot = null;
+
         if (Array.isArray(payload.claimedMilestones)) {
           this.claimedMilestones = payload.claimedMilestones as BingoMilestone[];
         } else {
@@ -457,6 +472,7 @@ class RemoteBingoService {
           this.milestoneWinners = { ...this.milestoneWinners, [tier]: String(payload.playerName) };
         }
         const claim: RemoteBingoClaim = {
+          claimId: payload.claimId ? String(payload.claimId) : dedupKey,
           userId: payload.userId || 'remote-user',
           playerName: payload.playerName,
           pattern: payload.pattern || 'FULLBRETT BINGO',
@@ -477,13 +493,7 @@ class RemoteBingoService {
 
     socialSocket.on('bingo:claim_rejected', (payload: any) => {
       if (payload && typeof payload === 'object') {
-        if (Array.isArray(payload.claimedMilestones)) {
-          this.claimedMilestones = payload.claimedMilestones as BingoMilestone[];
-        }
-        if (payload.milestoneWinners && typeof payload.milestoneWinners === 'object') {
-          this.milestoneWinners = { ...payload.milestoneWinners };
-        }
-        this.notify();
+        this.handleClaimRejectionPayload(payload);
       }
     });
 
@@ -631,6 +641,131 @@ class RemoteBingoService {
     if (winnerName && !this.milestoneWinners[tier]) {
       this.milestoneWinners = { ...this.milestoneWinners, [tier]: winnerName };
     }
+  }
+
+  private handleClaimRejectionPayload(payload: {
+    message?: string;
+    milestone?: BingoMilestone;
+    claimedMilestones?: BingoMilestone[];
+    milestoneWinners?: Partial<Record<BingoMilestone, string>>;
+  }) {
+    if (Array.isArray(payload.claimedMilestones)) {
+      this.claimedMilestones = payload.claimedMilestones;
+    } else if (this.preClaimSnapshot) {
+      this.claimedMilestones = [...this.preClaimSnapshot.claimedMilestones];
+    }
+    if (payload.milestoneWinners && typeof payload.milestoneWinners === 'object') {
+      this.milestoneWinners = { ...payload.milestoneWinners };
+    } else if (this.preClaimSnapshot) {
+      this.milestoneWinners = { ...this.preClaimSnapshot.milestoneWinners };
+    }
+    this.preClaimSnapshot = null;
+    this.claimRejectedListeners.forEach((fn) => fn(payload));
+    this.notify();
+  }
+
+  private stopRoomStatePolling() {
+    if (this.statePollTimer) {
+      clearInterval(this.statePollTimer);
+      this.statePollTimer = null;
+    }
+  }
+
+  private startRoomStatePolling(cleanCode: string) {
+    this.stopRoomStatePolling();
+    if (typeof window === 'undefined' || !cleanCode) return;
+    const poll = () => {
+      const activeCode = this.currentRoomCode || this.hostCode;
+      if ((!this.isHost && !this.isRemotePlayer) || !activeCode || activeCode !== cleanCode) {
+        this.stopRoomStatePolling();
+        return;
+      }
+      fetch(`/api/rooms/state?code=${encodeURIComponent(cleanCode)}`, { cache: 'no-store' })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((st) => {
+          if (!st || !st.valid || (this.currentRoomCode !== cleanCode && this.hostCode !== cleanCode)) return;
+          if (typeof st.roundNumber === 'number' && st.roundNumber > this.roundNumber) {
+            this.roundNumber = st.roundNumber;
+            this.calledBallNumbersCache = [];
+            this.claimedMilestones = Array.isArray(st.claimedMilestones) ? st.claimedMilestones : [];
+            this.milestoneWinners =
+              st.milestoneWinners && typeof st.milestoneWinners === 'object' ? { ...st.milestoneWinners } : {};
+            this.lastCloudSyncSignature = '';
+            this.newRoundListeners.forEach((fn) =>
+              fn({
+                roomCode: cleanCode,
+                roundNumber: st.roundNumber,
+                reason: 'fullbrett',
+                timestamp: Date.now(),
+              })
+            );
+            this.notify();
+            return;
+          }
+          let changed = false;
+          if (Array.isArray(st.claimedMilestones)) {
+            const nextStr = JSON.stringify(st.claimedMilestones);
+            if (nextStr !== JSON.stringify(this.claimedMilestones)) {
+              this.claimedMilestones = st.claimedMilestones as BingoMilestone[];
+              changed = true;
+            }
+          }
+          if (st.milestoneWinners && typeof st.milestoneWinners === 'object') {
+            const nextWStr = JSON.stringify(st.milestoneWinners);
+            if (nextWStr !== JSON.stringify(this.milestoneWinners)) {
+              this.milestoneWinners = { ...st.milestoneWinners };
+              changed = true;
+            }
+          }
+          if (this.isRemotePlayer && Array.isArray(st.calledBalls) && st.calledBalls.length > 0) {
+            this.syncProvidedListeners.forEach((fn) => fn(st.calledBalls as CalledBall[]));
+          }
+          if (Array.isArray(st.connectedParticipants) && st.connectedParticipants.length > 0) {
+            const incomingConn = st.connectedParticipants as RemoteParticipant[];
+            const myId = socialSocket.getProfile().id;
+            if (this.isHost && this.canActAsHost()) {
+              incomingConn.forEach((p) => {
+                if (p?.id && p.id !== myId && !this.seenParticipantIds.has(p.id)) {
+                  this.seenParticipantIds.add(p.id);
+                  this.recordJoinActivity(p, p.game || 'Avstandsbingo');
+                  this.joinListeners.forEach((fn) => fn(p, incomingConn.length));
+                }
+              });
+            }
+            this.remoteParticipants = incomingConn;
+          }
+          if (st.lastClaim && st.lastClaim.playerName && st.lastClaim.timestamp) {
+            const lc = st.lastClaim;
+            const tier = lc.milestone || this.resolveMilestoneFromPattern(String(lc.pattern || ''), Boolean(lc.isFullHouse));
+            const dedupKey = String(
+              lc.claimId || `${String(lc.playerName).trim().toLowerCase()}:${tier}:${Number(st.roundNumber) || this.roundNumber}:${lc.timestamp}`
+            );
+            if (!this.seenClaimIds.has(dedupKey)) {
+              this.seenClaimIds.add(dedupKey);
+              const claim: RemoteBingoClaim = {
+                claimId: dedupKey,
+                userId: 'remote-poll',
+                playerName: String(lc.playerName),
+                pattern: String(lc.pattern || 'BINGO'),
+                milestone: tier,
+                cardIndex: 0,
+                isFullHouse: Boolean(lc.isFullHouse) || tier === 'fullbrett',
+                roundNumber: Number(st.roundNumber) || this.roundNumber,
+                claimedMilestones: [...this.claimedMilestones],
+                milestoneWinners: { ...this.milestoneWinners },
+                autoNewRoundDelayMs: tier === 'fullbrett' ? 4500 : 0,
+                timestamp: Number(lc.timestamp),
+              };
+              this.recordBingoClaimActivity(claim.playerName, tier, claim.pattern, 'Avstandsbingo');
+              this.claimListeners.forEach((fn) => fn(claim));
+              changed = true;
+            }
+          }
+          if (changed) this.notify();
+        })
+        .catch(() => {});
+    };
+    this.statePollTimer = setInterval(poll, 2500);
   }
 
   private handleChannelMessage(data: any) {
@@ -923,8 +1058,14 @@ class RemoteBingoService {
     if (forceReconnect || !wasAlreadySameHost) {
       socialSocket.connect(roomId);
     }
-    socialSocket.send('bingo:host_init', { roomCode: activeCode, hostName: this.hostName, hostKey });
+    socialSocket.send('bingo:host_init', {
+      roomCode: activeCode,
+      hostName: this.hostName,
+      hostKey,
+      calledBalls: this.mapBallNumbersToCalledBalls(this.calledBallNumbersCache),
+    });
     void this.registerRoomOnServer(activeCode);
+    this.startRoomStatePolling(activeCode);
     this.notify();
     return activeCode;
   }
@@ -1073,6 +1214,7 @@ class RemoteBingoService {
 
     // Live Firestore subscription + WS + HTTP sync for cross-device / cross-instance resilience
     this.attachRemoteBingoCloudSync(cleanCode);
+    this.startRoomStatePolling(cleanCode);
 
     socialSocket.send('caller:request_sync', { roomCode: cleanCode });
     setTimeout(() => {
@@ -1082,6 +1224,9 @@ class RemoteBingoService {
           .then((r) => r.json())
           .then((st) => {
             if (this.isRemotePlayer && this.currentRoomCode === cleanCode) {
+              if (typeof st?.roundNumber === 'number' && st.roundNumber > 0) {
+                this.roundNumber = st.roundNumber;
+              }
               if (Array.isArray(st?.claimedMilestones)) {
                 this.claimedMilestones = st.claimedMilestones as BingoMilestone[];
               }
@@ -1112,7 +1257,9 @@ class RemoteBingoService {
           undefined
         : undefined;
     this.stopRemoteRoomSubscription();
+    this.stopRoomStatePolling();
     this.seenParticipantIds.clear();
+    this.seenClaimIds.clear();
     this.isRemotePlayer = false;
     this.isHost = false;
     this.currentRoomCode = null;
@@ -1147,7 +1294,8 @@ class RemoteBingoService {
     cardIndex: number = 0,
     isFullHouse: boolean = true,
     overridePlayerName?: string,
-    confirmedNumbers?: number[]
+    confirmedNumbers?: number[],
+    calledBalls?: CalledBall[]
   ) {
     const tier = this.resolveMilestoneFromPattern(pattern, isFullHouse);
     if (this.claimedMilestones.includes(tier)) {
@@ -1159,9 +1307,17 @@ class RemoteBingoService {
       this.playerName ||
       socialSocket.getProfile().name;
 
+    this.preClaimSnapshot = {
+      claimedMilestones: [...this.claimedMilestones],
+      milestoneWinners: { ...this.milestoneWinners },
+    };
     this.applyLocalMilestoneClaim(tier, claimerName);
 
+    const claimId = `cl-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    this.seenClaimIds.add(claimId);
+
     const claim: RemoteBingoClaim = {
+      claimId,
       userId: socialSocket.getProfile().id,
       playerName: claimerName,
       pattern,
@@ -1175,15 +1331,41 @@ class RemoteBingoService {
       timestamp: Date.now(),
     };
 
-    socialSocket.send('bingo:remote_claim', {
+    const wsPayload = {
       roomCode: activeCode,
+      claimId,
       playerName: claim.playerName,
       pattern: claim.pattern,
       milestone: tier,
       isFullHouse,
       cardIndex: claim.cardIndex,
       confirmedNumbers,
-    });
+      calledBalls: calledBalls && calledBalls.length > 0 ? calledBalls : this.mapBallNumbersToCalledBalls(this.calledBallNumbersCache),
+    };
+
+    socialSocket.send('bingo:remote_claim', wsPayload);
+
+    if (typeof window !== 'undefined' && activeCode) {
+      fetch('/api/rooms/bingo/claim', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...wsPayload,
+          senderId: socialSocket.getProfile().id,
+        }),
+      })
+        .then(async (resp) => {
+          const data = await resp.json().catch(() => null);
+          if (!resp.ok || data?.success === false) {
+            if (data) {
+              this.handleClaimRejectionPayload(data);
+            }
+          } else if (data?.claim) {
+            this.preClaimSnapshot = null;
+          }
+        })
+        .catch(() => {});
+    }
 
     if (this.broadcastChannel) {
       this.broadcastChannel.postMessage({
@@ -1212,6 +1394,13 @@ class RemoteBingoService {
         hostKey,
         winnerName,
       });
+      if (typeof window !== 'undefined') {
+        fetch('/api/rooms/bingo/new_round', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ roomCode: activeCode, hostKey, winnerName }),
+        }).catch(() => {});
+      }
       void this.syncRoomToFirestore(activeCode, 'bingo', true);
     }
     this.notify();
@@ -1264,6 +1453,41 @@ class RemoteBingoService {
     });
   }
 
+  public requestBallSyncFromRoom() {
+    const activeCode = this.currentRoomCode || this.hostCode;
+    if (!activeCode) return;
+    socialSocket.send('caller:request_sync', { roomCode: activeCode });
+    if (typeof window !== 'undefined') {
+      fetch(`/api/rooms/state?code=${encodeURIComponent(activeCode)}`, { cache: 'no-store' })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((st) => {
+          if (!st || !st.valid) return;
+          if (typeof st.roundNumber === 'number' && st.roundNumber > this.roundNumber) {
+            this.roundNumber = st.roundNumber;
+            this.calledBallNumbersCache = [];
+            this.claimedMilestones = Array.isArray(st.claimedMilestones) ? st.claimedMilestones : [];
+            this.milestoneWinners =
+              st.milestoneWinners && typeof st.milestoneWinners === 'object' ? { ...st.milestoneWinners } : {};
+            this.lastCloudSyncSignature = '';
+            this.newRoundListeners.forEach((fn) =>
+              fn({
+                roomCode: activeCode,
+                roundNumber: st.roundNumber,
+                reason: 'fullbrett',
+                timestamp: Date.now(),
+              })
+            );
+            this.notify();
+            return;
+          }
+          if (Array.isArray(st.calledBalls) && st.calledBalls.length > 0) {
+            this.syncProvidedListeners.forEach((fn) => fn(st.calledBalls as CalledBall[]));
+          }
+        })
+        .catch(() => {});
+    }
+  }
+
   public kickParticipant(targetUserId: string, targetUserName: string) {
     if (!this.canActAsHost()) return;
     socialSocket.banUser(targetUserId, targetUserName);
@@ -1311,6 +1535,18 @@ class RemoteBingoService {
   public onNewRound(fn: (ev: BingoNewRoundEvent) => void): () => void {
     this.newRoundListeners.add(fn);
     return () => this.newRoundListeners.delete(fn);
+  }
+
+  public onClaimRejected(
+    fn: (payload: {
+      message?: string;
+      milestone?: BingoMilestone;
+      claimedMilestones?: BingoMilestone[];
+      milestoneWinners?: Partial<Record<BingoMilestone, string>>;
+    }) => void
+  ): () => void {
+    this.claimRejectedListeners.add(fn);
+    return () => this.claimRejectedListeners.delete(fn);
   }
 
   public onClaim(fn: (claim: RemoteBingoClaim) => void): () => void {

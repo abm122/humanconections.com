@@ -8,6 +8,7 @@ import { CalledBall } from '../types/bingo';
 import { sounds } from '../audio/soundEngine';
 import { progression } from '../services/progression';
 import { useTranslation } from '../services/i18n';
+import { getBingoUiTexts } from '../services/bingoUiI18n';
 
 interface BallCageCanvasProps {
   onBallDrawn?: (ball: CalledBall) => void;
@@ -54,7 +55,7 @@ export const BallCageCanvas: React.FC<BallCageCanvasProps> = ({
   onPause,
   isPaused = false,
   canDraw = true,
-  readOnlyMessage = '🔒 Kun arrangør styrer kuletrekningen',
+  readOnlyMessage,
   compactSidebar = false,
   tumblerSize,
   layout = 'auto',
@@ -67,7 +68,9 @@ export const BallCageCanvas: React.FC<BallCageCanvasProps> = ({
       : effectiveSize === 'compact'
       ? 'row'
       : 'stacked';
-  const { t } = useTranslation();
+  const { t, lang } = useTranslation();
+  const ui = getBingoUiTexts(lang);
+  const resolvedReadOnlyMessage = readOnlyMessage || `🔒 ${ui.hostControlsNote}`;
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [isSpinning, setIsSpinning] = useState(false);
   const [isScrambling, setIsScrambling] = useState(false);
@@ -617,13 +620,13 @@ export const BallCageCanvas: React.FC<BallCageCanvasProps> = ({
       ctx.textAlign = 'left';
       ctx.textBaseline = 'middle';
       if (state.isDrawing) {
-        ctx.fillText('🌪️ Blenderen virvler...', 18, 21);
+        ctx.fillText(`🌪️ ${ui.drumSpinning}`, 18, 21);
       } else if (currentBall) {
         ctx.fillText(`🎲 ${currentBall.letter}-${currentBall.number}: "${currentBall.affirmation.slice(0, 18)}"`, 18, 21);
       } else if (!canDraw) {
-        ctx.fillText('⏳ Venter på arrangør', 18, 21);
+        ctx.fillText(`⏳ ${ui.waitingForHostShort}`, 18, 21);
       } else {
-        ctx.fillText('🎲 Klar for terningkast', 18, 21);
+        ctx.fillText(`🎲 ${ui.readyToRoll}`, 18, 21);
       }
       ctx.restore();
 
@@ -635,7 +638,7 @@ export const BallCageCanvas: React.FC<BallCageCanvasProps> = ({
     return () => {
       cancelAnimationFrame(animId);
     };
-  }, [currentBall, canDraw]);
+  }, [currentBall, canDraw, ui]);
 
   // Handle auto caller interval
   useEffect(() => {
@@ -696,11 +699,7 @@ export const BallCageCanvas: React.FC<BallCageCanvasProps> = ({
             onTouchStart={handlePointerDown}
             onTouchMove={handlePointerMove}
             onTouchEnd={handlePointerUp}
-            title={
-              canDraw
-                ? 'Trykk eller dra for å rulle trommelen'
-                : 'Kun arrangøren trekker kulene fra trommelen'
-            }
+            title={canDraw ? ui.drawNextBtn : resolvedReadOnlyMessage}
           />
           <div
             className={`absolute top-2 left-2 rounded-full bg-black/80 border border-amber-400/60 text-amber-200 font-bold pointer-events-none shadow flex items-center gap-1 ${
@@ -710,12 +709,12 @@ export const BallCageCanvas: React.FC<BallCageCanvasProps> = ({
             {canDraw ? (
               <>
                 <span>🎲</span>
-                <span>{isCompact ? 'Trykk/dra for å rulle' : 'Trykk eller dra for å rulle trommelen'}</span>
+                <span>{ui.readyToRoll}</span>
               </>
             ) : (
               <>
                 <span>🔒</span>
-                <span>Arrangør styrer trekk</span>
+                <span>{ui.host}</span>
               </>
             )}
           </div>
@@ -724,7 +723,7 @@ export const BallCageCanvas: React.FC<BallCageCanvasProps> = ({
               isCompact ? 'text-[10px]' : isTv ? 'text-xs sm:text-sm' : 'text-xs'
             }`}
           >
-            {uncalledBalls.length > 0 ? `${uncalledBalls.length} kuler igjen` : 'Alle 75 kuler trukket'}
+            {`${uncalledBalls.length} ${ui.ballsRemainingSuffix}`}
           </div>
         </div>
 
@@ -744,7 +743,7 @@ export const BallCageCanvas: React.FC<BallCageCanvasProps> = ({
             }`}
           >
             <span>🎲</span>
-            <span>{isCompact ? 'Siste tall & ord' : 'Siste tall & ord fra blenderen'}</span>
+            <span>{ui.lastFromDrum}</span>
           </div>
 
           {currentBall ? (
@@ -789,14 +788,14 @@ export const BallCageCanvas: React.FC<BallCageCanvasProps> = ({
                   &ldquo;{currentBall.affirmation}&rdquo;
                 </span>
                 <span className={`text-amber-100/75 font-mono mt-0.5 block ${isTv ? 'text-xs' : 'text-[10px]'}`}>
-                  Kule #{calledBalls.length}/75 ({currentBall.letter}-{currentBall.number})
+                  #{calledBalls.length}/75 ({currentBall.letter}-{currentBall.number})
                 </span>
               </div>
 
               {/* Recent History Tray */}
               {calledBalls.length > 1 && (
                 <div className="mt-1.5 pt-1.5 border-t border-amber-500/20 w-full flex flex-wrap items-center justify-center gap-1">
-                  <span className="text-[9px] text-amber-300/60 uppercase font-mono">Før:</span>
+                  <span className="text-[9px] text-amber-300/60 uppercase font-mono">{ui.latestCallsTitle}:</span>
                   {calledBalls
                     .slice(0, -1)
                     .slice(-3)
@@ -827,12 +826,10 @@ export const BallCageCanvas: React.FC<BallCageCanvasProps> = ({
                 <span className={isCompact ? 'text-base font-bold' : 'text-xl font-bold'}>?</span>
               </div>
               <p className="text-xs text-amber-200/90 font-bold">
-                {canDraw ? 'Blenderen er klar' : 'Venter på arrangør'}
+                {canDraw ? ui.readyToRoll : ui.waitingForHostShort}
               </p>
               <p className="text-[10px] text-amber-300/60 mt-0.5">
-                {canDraw
-                  ? 'Rist eller trykk trekk for å starte'
-                  : 'Arrangøren trekker kulene'}
+                {canDraw ? ui.drawNextBtn : resolvedReadOnlyMessage}
               </p>
             </div>
           )}
@@ -847,7 +844,7 @@ export const BallCageCanvas: React.FC<BallCageCanvasProps> = ({
           }`}
         >
           {uncalledBalls.length === 0 && onRefillDrum ? (
-            <button
+              <button
               type="button"
               onClick={() => {
                 sounds.playPop(1.2);
@@ -855,10 +852,10 @@ export const BallCageCanvas: React.FC<BallCageCanvasProps> = ({
                 scrambleBalls(1.3, false);
               }}
               className="px-5 py-2.5 bg-gradient-to-r from-emerald-400 via-teal-400 to-amber-400 hover:brightness-110 active:scale-95 text-slate-950 font-heading font-black rounded-xl shadow-lg transition-all flex items-center gap-2 text-xs sm:text-sm cursor-pointer ring-2 ring-emerald-200 animate-pulse"
-              title="Fyll og bland alle 75 kuler i trommelen på nytt uten å nullstille spillernes bingokort"
+              title={ui.refillBtn}
             >
               <span>🔄</span>
-              <span>Bland trommelen på nytt (behold brett)</span>
+              <span>{ui.refillBtn}</span>
             </button>
           ) : (
             <button
@@ -869,7 +866,7 @@ export const BallCageCanvas: React.FC<BallCageCanvasProps> = ({
               <svg className={`w-4 h-4 ${isSpinning ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
               </svg>
-              {isSpinning ? 'Virvler...' : '🎲 Trekk kule / Terningkast'}
+              {isSpinning ? ui.drawingBtn : `🎲 ${ui.drawNextBtn}`}
             </button>
           )}
 
@@ -882,10 +879,10 @@ export const BallCageCanvas: React.FC<BallCageCanvasProps> = ({
                 ? 'bg-amber-400 text-slate-950 ring-2 ring-amber-200 animate-pulse'
                 : 'bg-gradient-to-r from-amber-600/30 to-amber-700/30 border border-amber-400/50 hover:border-amber-300 text-amber-200 hover:text-white'
             }`}
-            title="Scramble & Agitate Balls inside the tumbler (Hotkey: S)"
+            title={ui.scrambleBtn}
           >
             <span className={isScrambling ? 'animate-spin' : ''}>🌪️</span>
-            <span>{isScrambling ? t('auto_calling_active') : t('scramble_cage')}</span>
+            <span>{isScrambling ? ui.drumSpinning : ui.scrambleBtn}</span>
           </button>
 
           {/* Auto Roll */}
@@ -897,10 +894,10 @@ export const BallCageCanvas: React.FC<BallCageCanvasProps> = ({
                 : 'bg-amber-950/60 border-amber-500/30 text-amber-200 hover:bg-amber-900/40'
             }`}
           >
-            {isAutoCalling ? `${t('auto_calling')} (5s)` : `${t('auto_calling')} (5s)`}
+            {isAutoCalling ? `${ui.autoOnBtn} (5s)` : `${ui.autoOffBtn} (5s)`}
           </button>
 
-          {/* Pause/Fortsett-knapp plassert rett ved trommelen */}
+          {/* Pause/Resume button */}
           {onPause && (
             <button
               onClick={() => {
@@ -912,10 +909,10 @@ export const BallCageCanvas: React.FC<BallCageCanvasProps> = ({
                   ? 'bg-rose-500 text-white ring-2 ring-rose-300 animate-pulse'
                   : 'bg-gradient-to-r from-amber-500/25 to-amber-600/25 border border-amber-400/50 hover:bg-amber-500/40 text-amber-200 hover:text-white'
               }`}
-              title="Pause eller fortsett spillet (fryser også spilletid)"
+              title={ui.pauseTitle}
             >
               <span>{isPaused ? '▶️' : '⏸️'}</span>
-              <span>{isPaused ? 'Fortsett' : 'Pause'}</span>
+              <span>{isPaused ? ui.resumeGameBtn : 'Pause'}</span>
             </button>
           )}
 
@@ -926,7 +923,7 @@ export const BallCageCanvas: React.FC<BallCageCanvasProps> = ({
                 onOpenMixer();
               }}
               className="px-3 py-2.5 rounded-xl bg-amber-950/70 border border-amber-500/40 hover:border-amber-400 text-amber-200 hover:text-amber-100 text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer"
-              title="Open Mixer & Cage Controls"
+              title={t('mixer')}
             >
               <span>🎛️</span>
               <span>{t('mixer')}</span>
@@ -940,17 +937,17 @@ export const BallCageCanvas: React.FC<BallCageCanvasProps> = ({
                 onOpenAudience();
               }}
               className="px-3 py-2.5 rounded-xl bg-amber-950/70 border border-amber-500/40 hover:border-amber-400 text-amber-200 hover:text-amber-100 text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer"
-              title="Show Audience TV / Projector Display"
+              title={ui.tvProjector}
             >
               <span>📺</span>
-              <span>{t('audience_tv')}</span>
+              <span>{ui.tvProjector}</span>
             </button>
           )}
         </div>
       ) : (
         <div className="mt-2 w-full pt-3 border-t border-amber-500/15 flex items-center justify-center">
           <div className="px-4 py-2 rounded-xl bg-black/60 border border-amber-500/30 text-amber-200 text-xs font-bold flex items-center gap-2">
-            <span>{readOnlyMessage}</span>
+            <span>{resolvedReadOnlyMessage}</span>
           </div>
         </div>
       )}

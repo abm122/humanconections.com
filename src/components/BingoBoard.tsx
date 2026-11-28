@@ -7,6 +7,8 @@ import React, { useState } from 'react';
 import { BingoCell, CardDisplayMode, CalledBall } from '../types/bingo';
 import { sounds } from '../audio/soundEngine';
 import { GoldenCoinLogo } from './GoldenCoinLogo';
+import { useTranslation } from '../services/i18n';
+import { getBingoUiTexts } from '../services/bingoUiI18n';
 
 interface BingoBoardProps {
   card: BingoCell[][];
@@ -37,6 +39,8 @@ export const BingoBoard: React.FC<BingoBoardProps> = ({
   currentBall = null,
   onPause,
 }) => {
+  const { lang } = useTranslation();
+  const ui = getBingoUiTexts(lang);
   // Modal for story / reflection note on cell click
   const [selectedCell, setSelectedCell] = useState<BingoCell | null>(null);
   const [partnerInput, setPartnerInput] = useState('');
@@ -116,7 +120,7 @@ export const BingoBoard: React.FC<BingoBoardProps> = ({
           )}
           {totalCards > 1 && (
             <span className="text-2xs font-extrabold uppercase tracking-wider text-amber-400 bg-amber-500/20 px-2 py-0.5 rounded-md border border-amber-400/40">
-              Card #{cardIndex + 1} of {totalCards}
+              {ui.cardNumberPrefix}{cardIndex + 1} / {totalCards}
             </span>
           )}
         </div>
@@ -135,9 +139,9 @@ export const BingoBoard: React.FC<BingoBoardProps> = ({
                   ? 'bg-amber-400 text-slate-950 shadow-sm'
                   : 'text-amber-200/70 hover:text-amber-100'
               }`}
-              title="Show prominent B-I-N-G-O numbers"
+              title={ui.fmtNumbers}
             >
-              # Numbers
+              {ui.fmtNumbers}
             </button>
             <button
               onClick={() => {
@@ -149,9 +153,9 @@ export const BingoBoard: React.FC<BingoBoardProps> = ({
                   ? 'bg-amber-400 text-slate-950 shadow-sm'
                   : 'text-amber-200/70 hover:text-amber-100'
               }`}
-              title="Show both numbers and joyful meaning"
+              title={ui.fmtBoth}
             >
-              Both
+              {ui.fmtBoth}
             </button>
             <button
               onClick={() => {
@@ -163,9 +167,9 @@ export const BingoBoard: React.FC<BingoBoardProps> = ({
                   ? 'bg-amber-400 text-slate-950 shadow-sm'
                   : 'text-amber-200/70 hover:text-amber-100'
               }`}
-              title="Show story and connection prompts"
+              title={ui.fmtPrompts}
             >
-              Prompts
+              {ui.fmtPrompts}
             </button>
           </div>
         )}
@@ -191,7 +195,7 @@ export const BingoBoard: React.FC<BingoBoardProps> = ({
             <div className="flex flex-col text-left min-w-0">
               <div className="flex items-center gap-1.5 flex-wrap">
                 <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-amber-300/80">
-                  Siste fra blenderen:
+                  {ui.lastFromDrum}
                 </span>
                 <span className="text-xs font-heading font-black text-amber-300 bg-amber-400/20 px-1.5 py-0.2 rounded border border-amber-400/40">
                   {currentBall.letter}-{currentBall.number}
@@ -206,8 +210,8 @@ export const BingoBoard: React.FC<BingoBoardProps> = ({
           <div className="shrink-0 flex items-center gap-1.5">
             <span className="px-2.5 py-1 rounded-full bg-amber-500/15 border border-amber-400/40 text-[10px] sm:text-xs font-bold text-amber-200 flex items-center gap-1">
               <span>👀</span>
-              <span className="hidden sm:inline">Skann kortet & trykk for å bekrefte</span>
-              <span className="sm:hidden">Skann & trykk</span>
+              <span className="hidden sm:inline">{ui.scanAndTap}</span>
+              <span className="sm:hidden">{ui.physicalConfirmHint}</span>
             </span>
           </div>
         </div>
@@ -254,7 +258,7 @@ export const BingoBoard: React.FC<BingoBoardProps> = ({
                 >
                   <GoldenCoinLogo size="sm" />
                   <span className="font-heading font-extrabold text-2xs sm:text-xs text-amber-300 tracking-wider mt-0.5">
-                    FREE JOY
+                    {ui.freeSpaceLabel}
                   </span>
                 </div>
               );
@@ -293,7 +297,7 @@ export const BingoBoard: React.FC<BingoBoardProps> = ({
                       {cell.letter ? `${cell.letter}-${cell.number ?? ''}` : cell.number}
                     </span>
                     <span className="text-[10px] font-bold text-amber-200/75">
-                      {cell.isMarked ? '✓ Bekreftet' : 'Trykk for å bekrefte'}
+                      {cell.isMarked ? `✓ ${ui.connected}` : ui.scanAndTap}
                     </span>
                   </div>
                   <div className="text-xs font-bold text-white leading-snug break-words whitespace-normal">
@@ -371,7 +375,7 @@ export const BingoBoard: React.FC<BingoBoardProps> = ({
 
                       {cell.markedBy && (
                         <div className="text-3xs truncate px-1 py-0.2 rounded bg-amber-400/20 text-amber-300 font-medium">
-                          with {cell.markedBy}
+                          {ui.withLabel} {cell.markedBy}
                         </div>
                       )}
                     </div>
@@ -394,7 +398,7 @@ export const BingoBoard: React.FC<BingoBoardProps> = ({
                       </p>
                       {cell.markedBy && (
                         <div className="text-3xs truncate px-1 py-0.2 rounded bg-amber-400/20 text-amber-300 font-medium">
-                          with {cell.markedBy}
+                          {ui.withLabel} {cell.markedBy}
                         </div>
                       )}
                     </div>
@@ -414,12 +418,13 @@ export const BingoBoard: React.FC<BingoBoardProps> = ({
               <div className="flex items-center gap-2">
                 <span className="text-xl">💛</span>
                 <h3 className="font-heading font-bold text-base text-amber-200">
-                  Record Connection & Story
+                  {ui.markConfirmTitle}
                 </h3>
               </div>
               <button
                 onClick={() => setSelectedCell(null)}
                 className="p-1 text-amber-300 hover:text-amber-100 cursor-pointer"
+                title={ui.close}
               >
                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -430,7 +435,7 @@ export const BingoBoard: React.FC<BingoBoardProps> = ({
             <div className="my-4 p-3.5 rounded-xl bg-amber-950/40 border border-amber-500/20 text-center">
               {selectedCell.letter && selectedCell.number && (
                 <div className="text-xs font-bold uppercase tracking-wider text-amber-400 mb-1">
-                  Ball {selectedCell.letter}-{selectedCell.number}
+                  {selectedCell.letter}-{selectedCell.number}
                 </div>
               )}
               <p className="font-heading font-semibold text-sm text-amber-100">
@@ -441,26 +446,26 @@ export const BingoBoard: React.FC<BingoBoardProps> = ({
             <div className="space-y-3">
               <div>
                 <label className="text-2xs font-bold uppercase tracking-wider text-amber-300/80 block mb-1">
-                  Connected With (Friend or Companion)
+                  {ui.partnerNameLabel}
                 </label>
                 <input
                   type="text"
                   value={partnerInput}
                   onChange={(e) => setPartnerInput(e.target.value)}
-                  placeholder="e.g. Maya or Uncle David"
+                  placeholder={ui.partnerPlaceholder}
                   className="w-full px-3 py-2 rounded-xl bg-black/50 border border-amber-500/30 text-xs text-amber-100 placeholder-amber-400/40 focus:outline-none focus:border-amber-400"
                 />
               </div>
 
               <div>
                 <label className="text-2xs font-bold uppercase tracking-wider text-amber-300/80 block mb-1">
-                  Heartwarming Story or Note (Optional +100 Joy Sparks)
+                  {ui.storyLabel}
                 </label>
                 <textarea
                   value={noteInput}
                   onChange={(e) => setNoteInput(e.target.value)}
                   rows={2}
-                  placeholder="Share a brief memory or sweet note..."
+                  placeholder={ui.storyPlaceholder}
                   className="w-full px-3 py-2 rounded-xl bg-black/50 border border-amber-500/30 text-xs text-amber-100 placeholder-amber-400/40 focus:outline-none focus:border-amber-400"
                 />
               </div>
@@ -471,13 +476,13 @@ export const BingoBoard: React.FC<BingoBoardProps> = ({
                 onClick={() => handleConfirmDaub(false)}
                 className="px-4 py-2 rounded-xl text-xs font-semibold bg-black/40 border border-amber-500/30 text-amber-200 hover:bg-black/60 cursor-pointer"
               >
-                Quick Daub (+50 pts)
+                {ui.quickDaubBtn}
               </button>
               <button
                 onClick={() => handleConfirmDaub(true)}
                 className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 text-slate-950 font-heading font-bold text-xs shadow-md cursor-pointer flex items-center gap-1.5"
               >
-                <span>Save Story & Daub (+150 pts)</span>
+                <span>{ui.recordStoryBtn}</span>
                 <span>✨</span>
               </button>
             </div>

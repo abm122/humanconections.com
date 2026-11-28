@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { sounds } from '../audio/soundEngine';
 import { remoteBingo, RemoteParticipant, HostActivityNotification } from '../services/remoteBingo';
 import { moderation } from '../services/moderation';
@@ -13,6 +13,710 @@ import { socialSocket } from '../services/socialSocket';
 import { authService, AuthUser } from '../services/authService';
 import { musicBingoService } from '../services/musicBingoService';
 import { DigitalMusicBingoBoard } from './DigitalMusicBingoBoard';
+import { SupportedLanguage, useTranslation } from '../services/i18n';
+import {
+  formatMilestoneLabel,
+  getBingoUiTexts,
+  localizeBingoPattern,
+  localizeServerBingoMessage,
+} from '../services/bingoUiI18n';
+
+interface RemoteExtraTexts {
+  subtitle: string;
+  messagesTab: string;
+  lockedBadge: string;
+  switchBigScreen: string;
+  connectedRoomPrefix: string;
+  chooseModeHint: string;
+  numbersBingoBtn: string;
+  musicBingoBtn: string;
+  sendMsgHostBtn: string;
+  enterCodeHint: string;
+  nickLabel: string;
+  nickPlaceholder: string;
+  kahootTitle: string;
+  kahootBody: string;
+  wellbeingNote: string;
+  joinAction: string;
+  hostOnlyLockTitle: string;
+  hostOnlyLockDesc: string;
+  hostNeedPassDesc: string;
+  hostBenefit1: string;
+  hostBenefit2: string;
+  hostBenefit3: string;
+  hostBenefit4: string;
+  payHostBtn: string;
+  hostProfileLabel: string;
+  activePaidBadge: string;
+  changeNameBtn: string;
+  hostNamePlaceholder: string;
+  spillCodePrefix: string;
+  leftSuffix: string;
+  cloudOpenBadge: string;
+  serverOpenBadge: string;
+  syncingBadge: string;
+  reactivateBtn: string;
+  newRoundBtnFull: string;
+  generateCodeBtn: string;
+  codeOpenAllScreens: string;
+  codeHiddenTvClickOpen: string;
+  codeMaskedMine: string;
+  hideOnMyScreen: string;
+  codePrivacyLine: string;
+  shareTipPrefix: string;
+  realtimeLabel: string;
+  kickBtn: string;
+  bannedHeader: string;
+  autoExpiryNote: string;
+  unbanBtn: string;
+  banRemainingPrefix: string;
+  banMinutesSuffix: string;
+  expiredBadge: string;
+  msgIntroTitle: string;
+  msgIntroBody: string;
+  msgEmptyTitle: string;
+  msgEmptyHint: string;
+  msgHostPlaceholder: string;
+  msgPlayerPlaceholder: string;
+  sendBtn: string;
+  footerBrand: string;
+  codeAfterPay: string;
+  confirmNewRoundText: string;
+  confirmKickText: string;
+  confirmYes: string;
+  hostLabelSuffix: string;
+  youLabel: string;
+  badNickErr: string;
+  joinFailErr: string;
+  connectedNotice: string;
+  codeLockedErr: string;
+  newCodeNotice: string;
+  roundStartedNotice: string;
+  kickedNotice: string;
+  unbannedNotice: string;
+  hostNameUpdated: string;
+  codeReactivatedNotice: string;
+  marksSuffix: string;
+}
+
+const REMOTE_EXTRA: Record<SupportedLanguage, RemoteExtraTexts> = {
+  nb: {
+    subtitle: 'Spill sammen på avstand fra mobil, PC eller storskjerm',
+    messagesTab: 'Meldinger',
+    lockedBadge: 'Låst',
+    switchBigScreen: 'Bytt til Storskjerm',
+    connectedRoomPrefix: 'Du er tilkoblet rom:',
+    chooseModeHint: 'Velg om du vil spille vanlig Tallbingo eller Digitalt Musikkbingo-brett!',
+    numbersBingoBtn: '🎱 Vanlig Tallbingo',
+    musicBingoBtn: '🎵 Musikkbingo-brett',
+    sendMsgHostBtn: 'Send melding til arrangør',
+    enterCodeHint: 'Fås fra bingoverten, storskjermen eller publikumsvisningen.',
+    nickLabel: 'Kallenavn (ingen e-post eller innlogging):',
+    nickPlaceholder: 'f.eks. Løve, Stjerne eller Familien Hansen',
+    kahootTitle: 'Gratis for barn, familie & gjester:',
+    kahootBody: 'Arrangøren har betalt for arrangementet. Du trenger ingen konto, ingen e-post og ingen betaling — tast bare koden og et kallenavn!',
+    wellbeingNote: 'Appen er kun for glede og sosialt samvær. Upassende ord eller forstyrrelser tolereres ikke og fører til automatisk 10-minutters utestengelse.',
+    joinAction: 'Koble til vertens spillrom (Gratis med kode)',
+    hostOnlyLockTitle: 'Kun arrangøren styrer spillrommet og spillkoden',
+    hostOnlyLockDesc: 'Du deltar som spiller. Bare arrangøren kan generere spillkoder (1 per runde), trekke kuler og styre rommet.',
+    hostNeedPassDesc: 'For å opprette spillrom, få spillkode og arrangere avstandsbingo eller storskjermbingo må verten aktivere spilletid.',
+    hostBenefit1: 'Sikker betaling med Visa, Mastercard, Apple Pay eller Google Pay',
+    hostBenefit2: '1 unik spillkode per runde',
+    hostBenefit3: 'Alle dine deltakere spiller helt gratis med koden din',
+    hostBenefit4: 'Deltakere kan sende meldinger direkte til deg som vert',
+    payHostBtn: 'Aktiver arrangørtilgang (Kort / Apple Pay / Google Pay)',
+    hostProfileLabel: 'Arrangørprofil',
+    activePaidBadge: '✓ Aktiv & Betalt',
+    changeNameBtn: '✏️ Endre navn',
+    hostNamePlaceholder: 'Skriv arrangørnavn...',
+    spillCodePrefix: 'Spillkode',
+    leftSuffix: 'igjen',
+    cloudOpenBadge: '☁️ Åpen overalt (Server + Sky aktiv)',
+    serverOpenBadge: '🟢 Aktivert på server for mobil (Bingo & Quiz)',
+    syncingBadge: '⏳ Synkroniserer rom med server...',
+    reactivateBtn: '🔄 Aktiver på nytt',
+    newRoundBtnFull: 'Ny runde (1 ny kode)',
+    generateCodeBtn: 'Generer kode',
+    codeOpenAllScreens: '📡 Deltakerkode ÅPEN på alle skjermer',
+    codeHiddenTvClickOpen: '🔒 Deltakerkode SKJULT på TV (Klikk for å åpne)',
+    codeMaskedMine: '🙈 Kode skjult på min skjerm',
+    hideOnMyScreen: '🙈 Skjul på min skjerm',
+    codePrivacyLine: '📡 Romkoden deles åpent på alle skjermer · Arrangørens private innlogging & fasit er alltid skjult',
+    shareTipPrefix: '💡 Del kode eller lenke: Del koden',
+    realtimeLabel: 'Sanntid',
+    kickBtn: '🚫 Kast ut (10 min)',
+    bannedHeader: '🛡️ Midlertidig utestengte',
+    autoExpiryNote: '10 min auto-opphør',
+    unbanBtn: '✓ Opphev',
+    banRemainingPrefix: 'Utestengt i',
+    banMinutesSuffix: 'min til',
+    expiredBadge: 'Utløpt',
+    msgIntroTitle: 'Direktemeldinger med arrangør:',
+    msgIntroBody: 'Spillere kan sende spørsmål eller hilse til bingoverten. Verten ser alle meldinger og kan svare direkte.',
+    msgEmptyTitle: 'Ingen meldinger ennå.',
+    msgEmptyHint: 'Send et spørsmål, hilsen eller be om en allsang til bingoverten!',
+    msgHostPlaceholder: 'Svar som bingovert til rommet...',
+    msgPlayerPlaceholder: 'Skriv en melding eller hilsen til bingoverten...',
+    sendBtn: 'Send',
+    footerBrand: 'Avstandsbingo • Sanntidssynkronisering',
+    codeAfterPay: 'Kode genereres ved oppstart',
+    confirmNewRoundText: 'Starte ny runde? Dette nullstiller trukne kuler og starter en ny runde for hele rommet.',
+    confirmKickText: 'Utestenge {name} i 10 minutter for å opprettholde sosial trivsel?',
+    confirmYes: 'Ja, bekreft',
+    hostLabelSuffix: 'Arrangør',
+    youLabel: 'Deg',
+    badNickErr: 'Vennligst velg et hyggelig og familievennlig kallenavn.',
+    joinFailErr: 'Kunne ikke koble til rommet.',
+    connectedNotice: '🎉 Tilkoblet rom {code} som {name}! Kulene synkroniseres direkte fra verten.',
+    codeLockedErr: 'Koden genereres kun 1 gang per aktive runde. Start en ny runde for å generere ny kode.',
+    newCodeNotice: 'Ny spillkode generert for runden: {code}',
+    roundStartedNotice: 'Ny runde startet! Spillkode: {code}',
+    kickedNotice: '🚫 {name} ble utestengt i 10 minutter for å bevare sosial trivsel.',
+    unbannedNotice: '✅ Utestengelse av {name} ble opphevet. Spilleren kan nå delta igjen!',
+    hostNameUpdated: 'Arrangørnavn oppdatert til {name}!',
+    codeReactivatedNotice: '🔄 Spillkode {code} synkronisert og aktivert for alle deltakere på mobil!',
+    marksSuffix: 'kryss',
+  },
+  en: {
+    subtitle: 'Play together remotely from mobile, PC or big screen',
+    messagesTab: 'Messages',
+    lockedBadge: 'Locked',
+    switchBigScreen: 'Switch to Big Screen',
+    connectedRoomPrefix: 'You are connected to room:',
+    chooseModeHint: 'Choose whether to play classic Number Bingo or Digital Music Bingo!',
+    numbersBingoBtn: '🎱 Classic Number Bingo',
+    musicBingoBtn: '🎵 Music Bingo Board',
+    sendMsgHostBtn: 'Send message to host',
+    enterCodeHint: 'Provided by the host, big screen or audience display.',
+    nickLabel: 'Nickname (no email or login required):',
+    nickPlaceholder: 'e.g. Lion, Star or Family Hansen',
+    kahootTitle: 'Free for kids, family & guests:',
+    kahootBody: 'The host has already activated the event. No account, no email and no payment needed — just enter the code and a nickname!',
+    wellbeingNote: 'This app is purely for joy and social connection. Inappropriate words or disruptions lead to an automatic 10-minute timeout.',
+    joinAction: 'Join Host Room (Free with code)',
+    hostOnlyLockTitle: 'Only the host manages the game room and code',
+    hostOnlyLockDesc: 'You are joined as a player. Only the host can generate room codes, draw balls and manage the room.',
+    hostNeedPassDesc: 'To create a game room, share a code and host remote or big-screen bingo, the host must activate playtime.',
+    hostBenefit1: 'Secure payment with Visa, Mastercard, Apple Pay or Google Pay',
+    hostBenefit2: '1 unique room code per round',
+    hostBenefit3: 'All your participants join completely free using your code',
+    hostBenefit4: 'Participants can send direct messages to you as host',
+    payHostBtn: 'Activate Host Access (Card / Apple Pay / Google Pay)',
+    hostProfileLabel: 'Host Profile',
+    activePaidBadge: '✓ Active & Paid',
+    changeNameBtn: '✏️ Edit name',
+    hostNamePlaceholder: 'Enter host name...',
+    spillCodePrefix: 'Game Code',
+    leftSuffix: 'left',
+    cloudOpenBadge: '☁️ Open everywhere (Server + Cloud active)',
+    serverOpenBadge: '🟢 Active on server for mobile (Bingo & Quiz)',
+    syncingBadge: '⏳ Syncing room with server...',
+    reactivateBtn: '🔄 Reactivate',
+    newRoundBtnFull: 'New round (1 new code)',
+    generateCodeBtn: 'Generate code',
+    codeOpenAllScreens: '📡 Participant code OPEN on all screens',
+    codeHiddenTvClickOpen: '🔒 Participant code HIDDEN on TV (Click to show)',
+    codeMaskedMine: '🙈 Code hidden on my screen',
+    hideOnMyScreen: '🙈 Hide on my screen',
+    codePrivacyLine: '📡 Room code is open on all screens · Host login & answers are always private',
+    shareTipPrefix: '💡 Share code or link: Share code',
+    realtimeLabel: 'Live',
+    kickBtn: '🚫 Remove (10 min)',
+    bannedHeader: '🛡️ Temporarily removed',
+    autoExpiryNote: '10 min auto-expiry',
+    unbanBtn: '✓ Restore',
+    banRemainingPrefix: 'Timed out for',
+    banMinutesSuffix: 'more min',
+    expiredBadge: 'Expired',
+    msgIntroTitle: 'Direct messages with host:',
+    msgIntroBody: 'Players can send questions or greetings to the host. The host sees all messages and can reply directly.',
+    msgEmptyTitle: 'No messages yet.',
+    msgEmptyHint: 'Send a question, greeting or song request to the host!',
+    msgHostPlaceholder: 'Reply as host to the room...',
+    msgPlayerPlaceholder: 'Write a message or greeting to the host...',
+    sendBtn: 'Send',
+    footerBrand: 'Remote Bingo • Real-Time Sync',
+    codeAfterPay: 'Code generated on start',
+    confirmNewRoundText: 'Start a new round? This resets drawn balls and starts a fresh round for everyone.',
+    confirmKickText: 'Temporarily remove {name} for 10 minutes to keep the room welcoming?',
+    confirmYes: 'Yes, confirm',
+    hostLabelSuffix: 'Host',
+    youLabel: 'You',
+    badNickErr: 'Please choose a friendly, family-safe nickname.',
+    joinFailErr: 'Could not connect to the room.',
+    connectedNotice: '🎉 Connected to room {code} as {name}! Balls sync automatically from the host.',
+    codeLockedErr: 'The code is generated once per active round. Start a new round for a new code.',
+    newCodeNotice: 'New game code generated for this round: {code}',
+    roundStartedNotice: 'New round started! Room code: {code}',
+    kickedNotice: '🚫 {name} was timed out for 10 minutes.',
+    unbannedNotice: '✅ {name} can join again!',
+    hostNameUpdated: 'Host name updated to {name}!',
+    codeReactivatedNotice: '🔄 Room code {code} synced and active for all mobile players!',
+    marksSuffix: 'marks',
+  },
+  sv: {
+    subtitle: 'Spela tillsammans på distans från mobil, dator eller storbildsskärm',
+    messagesTab: 'Meddelanden',
+    lockedBadge: 'Låst',
+    switchBigScreen: 'Byt till Storbild',
+    connectedRoomPrefix: 'Du är ansluten till rum:',
+    chooseModeHint: 'Välj om du vill spela klassisk sifferbingo eller digital musikbingo!',
+    numbersBingoBtn: '🎱 Klassisk Sifferbingo',
+    musicBingoBtn: '🎵 Musikbingobricka',
+    sendMsgHostBtn: 'Skicka meddelande till värden',
+    enterCodeHint: 'Fås från bingovärden eller storbildsskärmen.',
+    nickLabel: 'Smeknamn (ingen e-post eller inloggning):',
+    nickPlaceholder: 't.ex. Lejon, Stjärna eller Familjen Holm',
+    kahootTitle: 'Gratis för barn, familj & gäster:',
+    kahootBody: 'Värden har aktiverat evenemanget. Inget konto, ingen e-post och ingen betalning behövs — ange bara koden och ett smeknamn!',
+    wellbeingNote: 'Appen är endast för glädje och gemenskap. Olämpliga ord leder till automatisk 10 minuters avstängning.',
+    joinAction: 'Anslut till värdens spelrum (Gratis med kod)',
+    hostOnlyLockTitle: 'Endast värden styr spelrummet och koden',
+    hostOnlyLockDesc: 'Du deltar som spelare. Endast värden kan skapa koder och dra kulor.',
+    hostNeedPassDesc: 'För att skapa spelrum och dela kod måste värden aktivera speltid.',
+    hostBenefit1: 'Säker betalning med Visa, Mastercard, Apple Pay eller Google Pay',
+    hostBenefit2: '1 unik spelkod per runda',
+    hostBenefit3: 'Alla deltagare spelar helt gratis med din kod',
+    hostBenefit4: 'Deltagare kan skicka meddelanden direkt till dig som värd',
+    payHostBtn: 'Aktivera värdåtkomst (Kort / Apple Pay / Google Pay)',
+    hostProfileLabel: 'Värdprofil',
+    activePaidBadge: '✓ Aktiv & Betald',
+    changeNameBtn: '✏️ Ändra namn',
+    hostNamePlaceholder: 'Skriv värdnamn...',
+    spillCodePrefix: 'Spelkod',
+    leftSuffix: 'kvar',
+    cloudOpenBadge: '☁️ Öppen överallt (Server + Moln aktiv)',
+    serverOpenBadge: '🟢 Aktiverad på server för mobil (Bingo & Quiz)',
+    syncingBadge: '⏳ Synkroniserar rum med server...',
+    reactivateBtn: '🔄 Aktivera igen',
+    newRoundBtnFull: 'Ny runda (1 ny kod)',
+    generateCodeBtn: 'Generera kod',
+    codeOpenAllScreens: '📡 Deltagarkod ÖPPEN på alla skärmar',
+    codeHiddenTvClickOpen: '🔒 Deltagarkod DOLD på TV (Klicka för att visa)',
+    codeMaskedMine: '🙈 Kod dold på min skärm',
+    hideOnMyScreen: '🙈 Dölj på min skärm',
+    codePrivacyLine: '📡 Rumskoden visas öppet · Värdens privata inloggning & facit är alltid dolda',
+    shareTipPrefix: '💡 Dela kod eller länk: Dela koden',
+    realtimeLabel: 'Realtid',
+    kickBtn: '🚫 Ta bort (10 min)',
+    bannedHeader: '🛡️ Tillfälligt avstängda',
+    autoExpiryNote: '10 min auto-upphörande',
+    unbanBtn: '✓ Återställ',
+    banRemainingPrefix: 'Avstängd i',
+    banMinutesSuffix: 'min kvar',
+    expiredBadge: 'Utgången',
+    msgIntroTitle: 'Direktmeddelanden med värden:',
+    msgIntroBody: 'Spelare kan skicka frågor eller hälsningar till bingovärden.',
+    msgEmptyTitle: 'Inga meddelanden än.',
+    msgEmptyHint: 'Skicka en fråga eller hälsning till värden!',
+    msgHostPlaceholder: 'Svara som värd till rummet...',
+    msgPlayerPlaceholder: 'Skriv ett meddelande till värden...',
+    sendBtn: 'Skicka',
+    footerBrand: 'Distansbingo • Realtidssynk',
+    codeAfterPay: 'Kod skapas vid start',
+    confirmNewRoundText: 'Starta ny runda? Detta återställer dragna kulor och startar en ny runda för alla.',
+    confirmKickText: 'Stänga av {name} i 10 minuter för att bevara trivseln?',
+    confirmYes: 'Ja, bekräfta',
+    hostLabelSuffix: 'Värd',
+    youLabel: 'Du',
+    badNickErr: 'Vänligen välj ett trevligt och familjevänligt smeknamn.',
+    joinFailErr: 'Kunde inte ansluta till rummet.',
+    connectedNotice: '🎉 Ansluten till rum {code} som {name}! Kulorna synkas automatiskt.',
+    codeLockedErr: 'Koden skapas bara en gång per runda. Starta ny runda för ny kod.',
+    newCodeNotice: 'Ny spelkod skapad: {code}',
+    roundStartedNotice: 'Ny runda startad! Kod: {code}',
+    kickedNotice: '🚫 {name} stängdes av i 10 minuter.',
+    unbannedNotice: '✅ Avstängning för {name} hävd!',
+    hostNameUpdated: 'Värdnamn uppdaterat till {name}!',
+    codeReactivatedNotice: '🔄 Spelkod {code} synkad för alla mobiler!',
+    marksSuffix: 'kryss',
+  },
+  de: {
+    subtitle: 'Gemeinsam aus der Ferne per Smartphone, PC oder Großbildschirm spielen',
+    messagesTab: 'Nachrichten',
+    lockedBadge: 'Gesperrt',
+    switchBigScreen: 'Zum Großbildschirm',
+    connectedRoomPrefix: 'Verbunden mit Raum:',
+    chooseModeHint: 'Wähle klassisches Zahlen-Bingo oder Digitales Musik-Bingo!',
+    numbersBingoBtn: '🎱 Klassisches Zahlen-Bingo',
+    musicBingoBtn: '🎵 Musik-Bingo-Karte',
+    sendMsgHostBtn: 'Nachricht an Host senden',
+    enterCodeHint: 'Vom Gastgeber oder auf dem Großbildschirm bereitgestellt.',
+    nickLabel: 'Spitzname (keine E-Mail oder Anmeldung):',
+    nickPlaceholder: 'z.B. Löwe, Stern oder Familie Müller',
+    kahootTitle: 'Kostenlos für Kinder, Familie & Gäste:',
+    kahootBody: 'Der Gastgeber hat die Veranstaltung freigeschaltet. Kein Konto, keine E-Mail und keine Zahlung nötig — einfach Code und Namen eingeben!',
+    wellbeingNote: 'Diese App dient nur der Freude und Gemeinschaft. Unangemessene Wörter führen zu einer automatischen 10-Minuten-Pause.',
+    joinAction: 'Spielraum beitreten (Kostenlos mit Code)',
+    hostOnlyLockTitle: 'Nur der Gastgeber verwaltet Raum und Code',
+    hostOnlyLockDesc: 'Du spielst als Gast. Nur der Gastgeber kann Codes erstellen und Kugeln ziehen.',
+    hostNeedPassDesc: 'Zum Erstellen eines Spielraums muss der Gastgeber Spielzeit aktivieren.',
+    hostBenefit1: 'Sichere Zahlung mit Visa, Mastercard, Apple Pay oder Google Pay',
+    hostBenefit2: '1 eindeutiger Raumcode pro Runde',
+    hostBenefit3: 'Alle Teilnehmer spielen völlig kostenlos mit deinem Code',
+    hostBenefit4: 'Teilnehmer können dir direkt Nachrichten senden',
+    payHostBtn: 'Host-Zugang aktivieren (Karte / Apple Pay / Google Pay)',
+    hostProfileLabel: 'Host-Profil',
+    activePaidBadge: '✓ Aktiv & Bezahlt',
+    changeNameBtn: '✏️ Name ändern',
+    hostNamePlaceholder: 'Host-Name eingeben...',
+    spillCodePrefix: 'Spielcode',
+    leftSuffix: 'übrig',
+    cloudOpenBadge: '☁️ Überall offen (Server + Cloud aktiv)',
+    serverOpenBadge: '🟢 Auf Server für Mobilgeräte aktiv (Bingo & Quiz)',
+    syncingBadge: '⏳ Raum wird synchronisiert...',
+    reactivateBtn: '🔄 Neu aktivieren',
+    newRoundBtnFull: 'Neue Runde (1 neuer Code)',
+    generateCodeBtn: 'Code erzeugen',
+    codeOpenAllScreens: '📡 Teilnehmercode auf allen Bildschirmen SICHTBAR',
+    codeHiddenTvClickOpen: '🔒 Teilnehmercode auf TV VERBORGEN (Klicken zum Öffnen)',
+    codeMaskedMine: '🙈 Code auf meinem Bildschirm verborgen',
+    hideOnMyScreen: '🙈 Auf meinem Bildschirm verbergen',
+    codePrivacyLine: '📡 Raumcode ist offen · Host-Login & Lösungen bleiben immer privat',
+    shareTipPrefix: '💡 Code oder Link teilen: Code teilen',
+    realtimeLabel: 'Echtzeit',
+    kickBtn: '🚫 Entfernen (10 Min)',
+    bannedHeader: '🛡️ Vorübergehend gesperrt',
+    autoExpiryNote: '10 Min. Auto-Ablauf',
+    unbanBtn: '✓ Aufheben',
+    banRemainingPrefix: 'Gesperrt für',
+    banMinutesSuffix: 'Min',
+    expiredBadge: 'Abgelaufen',
+    msgIntroTitle: 'Direktnachrichten mit dem Gastgeber:',
+    msgIntroBody: 'Spieler können Fragen oder Grüße senden. Der Gastgeber kann direkt antworten.',
+    msgEmptyTitle: 'Noch keine Nachrichten.',
+    msgEmptyHint: 'Sende eine Frage oder einen Gruß an den Gastgeber!',
+    msgHostPlaceholder: 'Als Gastgeber an den Raum antworten...',
+    msgPlayerPlaceholder: 'Nachricht an den Gastgeber schreiben...',
+    sendBtn: 'Senden',
+    footerBrand: 'Fern-Bingo • Echtzeit-Sync',
+    codeAfterPay: 'Code wird beim Start erstellt',
+    confirmNewRoundText: 'Neue Runde starten? Gezogene Kugeln werden zurückgesetzt.',
+    confirmKickText: '{name} für 10 Minuten aus dem Raum entfernen?',
+    confirmYes: 'Ja, bestätigen',
+    hostLabelSuffix: 'Host',
+    youLabel: 'Du',
+    badNickErr: 'Bitte wähle einen freundlichen Spitznamen.',
+    joinFailErr: 'Verbindung zum Raum fehlgeschlagen.',
+    connectedNotice: '🎉 Mit Raum {code} als {name} verbunden!',
+    codeLockedErr: 'Pro aktiver Runde wird nur 1 Code erstellt. Starte eine neue Runde.',
+    newCodeNotice: 'Neuer Spielcode: {code}',
+    roundStartedNotice: 'Neue Runde gestartet! Code: {code}',
+    kickedNotice: '🚫 {name} wurde für 10 Minuten entfernt.',
+    unbannedNotice: '✅ Sperre für {name} aufgehoben!',
+    hostNameUpdated: 'Host-Name auf {name} aktualisiert!',
+    codeReactivatedNotice: '🔄 Raumcode {code} für alle Geräte synchronisiert!',
+    marksSuffix: 'Treffer',
+  },
+  es: {
+    subtitle: 'Juega a distancia desde móvil, PC o pantalla grande',
+    messagesTab: 'Mensajes',
+    lockedBadge: 'Bloqueado',
+    switchBigScreen: 'Ir a Pantalla Grande',
+    connectedRoomPrefix: 'Conectado a la sala:',
+    chooseModeHint: '¡Elige Bingo clásico de números o Bingo Musical digital!',
+    numbersBingoBtn: '🎱 Bingo Clásico',
+    musicBingoBtn: '🎵 Bingo Musical',
+    sendMsgHostBtn: 'Enviar mensaje al anfitrión',
+    enterCodeHint: 'Proporcionado por el anfitrión o en la pantalla grande.',
+    nickLabel: 'Apodo (sin correo ni registro):',
+    nickPlaceholder: 'ej. León, Estrella o Familia García',
+    kahootTitle: 'Gratis para niños, familia e invitados:',
+    kahootBody: 'El anfitrión ya activó el evento. No necesitas cuenta ni pago — ¡solo ingresa el código y tu apodo!',
+    wellbeingNote: 'Esta app es solo para alegría y convivencia. Palabras inapropiadas causan una pausa automática de 10 minutos.',
+    joinAction: 'Unirse a la sala (Gratis con código)',
+    hostOnlyLockTitle: 'Solo el anfitrión controla la sala y el código',
+    hostOnlyLockDesc: 'Participas como jugador. Solo el anfitrión puede generar códigos y sacar bolas.',
+    hostNeedPassDesc: 'Para crear una sala, el anfitrión debe activar tiempo de juego.',
+    hostBenefit1: 'Pago seguro con Visa, Mastercard, Apple Pay o Google Pay',
+    hostBenefit2: '1 código único por ronda',
+    hostBenefit3: 'Todos tus participantes juegan gratis con tu código',
+    hostBenefit4: 'Los participantes pueden enviarte mensajes directos',
+    payHostBtn: 'Activar acceso de anfitrión (Tarjeta / Apple Pay / Google Pay)',
+    hostProfileLabel: 'Perfil del anfitrión',
+    activePaidBadge: '✓ Activo y Pagado',
+    changeNameBtn: '✏️ Cambiar nombre',
+    hostNamePlaceholder: 'Nombre del anfitrión...',
+    spillCodePrefix: 'Código',
+    leftSuffix: 'restante',
+    cloudOpenBadge: '☁️ Abierto en todas partes (Servidor + Nube)',
+    serverOpenBadge: '🟢 Activo en servidor para móvil (Bingo y Quiz)',
+    syncingBadge: '⏳ Sincronizando sala...',
+    reactivateBtn: '🔄 Reactivar',
+    newRoundBtnFull: 'Nueva ronda (1 nuevo código)',
+    generateCodeBtn: 'Generar código',
+    codeOpenAllScreens: '📡 Código VISIBLE en todas las pantallas',
+    codeHiddenTvClickOpen: '🔒 Código OCULTO en TV (Clic para mostrar)',
+    codeMaskedMine: '🙈 Código oculto en mi pantalla',
+    hideOnMyScreen: '🙈 Ocultar en mi pantalla',
+    codePrivacyLine: '📡 El código es visible en pantallas · El acceso del anfitrión siempre es privado',
+    shareTipPrefix: '💡 Comparte código o enlace: Código',
+    realtimeLabel: 'En vivo',
+    kickBtn: '🚫 Retirar (10 min)',
+    bannedHeader: '🛡️ Suspendidos temporalmente',
+    autoExpiryNote: 'Expira en 10 min',
+    unbanBtn: '✓ Restaurar',
+    banRemainingPrefix: 'Suspendido por',
+    banMinutesSuffix: 'min más',
+    expiredBadge: 'Expirado',
+    msgIntroTitle: 'Mensajes directos con el anfitrión:',
+    msgIntroBody: 'Los jugadores pueden enviar saludos o preguntas al anfitrión.',
+    msgEmptyTitle: 'Sin mensajes todavía.',
+    msgEmptyHint: '¡Envía una pregunta o saludo al anfitrión!',
+    msgHostPlaceholder: 'Responder a la sala como anfitrión...',
+    msgPlayerPlaceholder: 'Escribe un mensaje al anfitrión...',
+    sendBtn: 'Enviar',
+    footerBrand: 'Bingo a Distancia • En Tiempo Real',
+    codeAfterPay: 'Código generado al iniciar',
+    confirmNewRoundText: '¿Iniciar nueva ronda? Esto reinicia las bolas sacadas para toda la sala.',
+    confirmKickText: '¿Retirar a {name} durante 10 minutos para mantener un ambiente amable?',
+    confirmYes: 'Sí, confirmar',
+    hostLabelSuffix: 'Anfitrión',
+    youLabel: 'Tú',
+    badNickErr: 'Por favor elige un apodo amigable.',
+    joinFailErr: 'No se pudo conectar a la sala.',
+    connectedNotice: '🎉 ¡Conectado a la sala {code} como {name}!',
+    codeLockedErr: 'El código se genera una vez por ronda activa.',
+    newCodeNotice: 'Nuevo código generado: {code}',
+    roundStartedNotice: '¡Nueva ronda iniciada! Código: {code}',
+    kickedNotice: '🚫 {name} fue retirado por 10 minutos.',
+    unbannedNotice: '✅ ¡{name} puede volver a entrar!',
+    hostNameUpdated: '¡Nombre actualizado a {name}!',
+    codeReactivatedNotice: '🔄 ¡Código {code} sincronizado para todos!',
+    marksSuffix: 'marcas',
+  },
+  fr: {
+    subtitle: 'Jouez ensemble à distance sur mobile, PC ou grand écran',
+    messagesTab: 'Messages',
+    lockedBadge: 'Verrouillé',
+    switchBigScreen: 'Passer au Grand Écran',
+    connectedRoomPrefix: 'Connecté à la salle :',
+    chooseModeHint: 'Choisissez le Bingo classique ou le Bingo Musical numérique !',
+    numbersBingoBtn: '🎱 Bingo Classique',
+    musicBingoBtn: '🎵 Grille Bingo Musical',
+    sendMsgHostBtn: 'Envoyer un message à l’hôte',
+    enterCodeHint: 'Fourni par l’animateur ou sur le grand écran.',
+    nickLabel: 'Pseudo (sans e-mail ni connexion) :',
+    nickPlaceholder: 'ex. Lion, Étoile ou Famille Martin',
+    kahootTitle: 'Gratuit pour enfants, famille & invités :',
+    kahootBody: 'L’hôte a activé l’événement. Aucun compte ni paiement requis — entrez simplement le code et un pseudo !',
+    wellbeingNote: 'Cette app est dédiée à la joie et au partage. Tout comportement inapproprié entraîne une pause automatique de 10 minutes.',
+    joinAction: 'Rejoindre la salle (Gratuit avec code)',
+    hostOnlyLockTitle: 'Seul l’hôte gère la salle et le code',
+    hostOnlyLockDesc: 'Vous jouez en tant que participant. Seul l’hôte peut générer des codes et tirer les boules.',
+    hostNeedPassDesc: 'Pour créer une salle et partager un code, l’hôte doit activer du temps de jeu.',
+    hostBenefit1: 'Paiement sécurisé par Visa, Mastercard, Apple Pay ou Google Pay',
+    hostBenefit2: '1 code unique par manche',
+    hostBenefit3: 'Tous vos participants jouent gratuitement avec votre code',
+    hostBenefit4: 'Les participants peuvent vous envoyer des messages directs',
+    payHostBtn: 'Activer l’accès hôte (Carte / Apple Pay / Google Pay)',
+    hostProfileLabel: 'Profil Hôte',
+    activePaidBadge: '✓ Actif & Payé',
+    changeNameBtn: '✏️ Modifier nom',
+    hostNamePlaceholder: 'Nom de l’hôte...',
+    spillCodePrefix: 'Code',
+    leftSuffix: 'restant',
+    cloudOpenBadge: '☁️ Ouvert partout (Serveur + Cloud)',
+    serverOpenBadge: '🟢 Actif sur serveur mobile (Bingo & Quiz)',
+    syncingBadge: '⏳ Synchronisation en cours...',
+    reactivateBtn: '🔄 Réactiver',
+    newRoundBtnFull: 'Nouvelle manche (1 nouveau code)',
+    generateCodeBtn: 'Générer code',
+    codeOpenAllScreens: '📡 Code participant VISIBLE sur tous les écrans',
+    codeHiddenTvClickOpen: '🔒 Code participant MASQUÉ sur TV (Cliquer pour afficher)',
+    codeMaskedMine: '🙈 Code masqué sur mon écran',
+    hideOnMyScreen: '🙈 Masquer sur mon écran',
+    codePrivacyLine: '📡 Le code est public · La connexion de l’hôte reste privée',
+    shareTipPrefix: '💡 Partager code ou lien : Code',
+    realtimeLabel: 'En direct',
+    kickBtn: '🚫 Retirer (10 min)',
+    bannedHeader: '🛡️ Exclus temporairement',
+    autoExpiryNote: 'Expiration 10 min',
+    unbanBtn: '✓ Rétablir',
+    banRemainingPrefix: 'Exclu pour encore',
+    banMinutesSuffix: 'min',
+    expiredBadge: 'Expiré',
+    msgIntroTitle: 'Messages directs avec l’hôte :',
+    msgIntroBody: 'Les joueurs peuvent envoyer des questions ou salutations à l’hôte.',
+    msgEmptyTitle: 'Aucun message pour l’instant.',
+    msgEmptyHint: 'Envoyez une question ou un mot amical à l’hôte !',
+    msgHostPlaceholder: 'Répondre à la salle en tant qu’hôte...',
+    msgPlayerPlaceholder: 'Écrire un message à l’hôte...',
+    sendBtn: 'Envoyer',
+    footerBrand: 'Bingo à Distance • Sync en direct',
+    codeAfterPay: 'Code généré au lancement',
+    confirmNewRoundText: 'Lancer une nouvelle manche ? Cela réinitialise les boules tirées.',
+    confirmKickText: 'Retirer {name} pendant 10 minutes pour préserver la convivialité ?',
+    confirmYes: 'Oui, confirmer',
+    hostLabelSuffix: 'Hôte',
+    youLabel: 'Vous',
+    badNickErr: 'Veuillez choisir un pseudo convivial.',
+    joinFailErr: 'Impossible de rejoindre la salle.',
+    connectedNotice: '🎉 Connecté à la salle {code} en tant que {name} !',
+    codeLockedErr: 'Un seul code est généré par manche active.',
+    newCodeNotice: 'Nouveau code généré : {code}',
+    roundStartedNotice: 'Nouvelle manche lancée ! Code : {code}',
+    kickedNotice: '🚫 {name} a été exclu pour 10 minutes.',
+    unbannedNotice: '✅ {name} peut rejoindre à nouveau !',
+    hostNameUpdated: 'Nom d’hôte mis à jour : {name} !',
+    codeReactivatedNotice: '🔄 Code {code} synchronisé pour tous !',
+    marksSuffix: 'cochés',
+  },
+  ti: {
+    subtitle: 'ካብ ሞባይል፡ ኮምፒዩተር ወይ ዓቢ ስክሪን ብርሑቕ ብሓባር ተጻወቱ',
+    messagesTab: 'መልእኽትታት',
+    lockedBadge: 'ዕጹው',
+    switchBigScreen: 'ናብ ዓቢ ስክሪን ቀይር',
+    connectedRoomPrefix: 'ናብዚ ክፍሊ ተራኺብካ ኣለኻ:',
+    chooseModeHint: 'ንቡር ቁጽሪ ቢንጎ ወይ ዲጂታል ሙዚቃ ቢንጎ ምረጽ!',
+    numbersBingoBtn: '🎱 ንቡር ቁጽሪ ቢንጎ',
+    musicBingoBtn: '🎵 ሙዚቃ ቢንጎ ቦርድ',
+    sendMsgHostBtn: 'ንመራሒ መልእኽቲ ስደድ',
+    enterCodeHint: 'ካብ መራሒ ወይ ዓቢ ስክሪን ዝርከብ ኮድ።',
+    nickLabel: 'ሳጓ (ኢመይል ወይ ምዝገባ ኣየድልን):',
+    nickPlaceholder: 'ንኣብነት: ኣንበሳ ወይ ስድራ ቤት',
+    kahootTitle: 'ንህጻናት፡ ስድራን ኣጋይሽን ብነጻ:',
+    kahootBody: 'መራሒ ነቲ መደብ ከፊትዎ ኣሎ። ኣካውንት ወይ ክፍሊት ኣየድልን — ኮድን ስምን ጥራይ ኣእቱ!',
+    wellbeingNote: 'እዛ ኣፕ ንሓጎስን ማሕበራዊ ምትእኽኻብን ጥራይ እያ። ዘይግባእ ቃላት ን10 ደቂቕ የእግድ።',
+    joinAction: 'ናብ ክፍሊ ጸወታ እቶ (ብነጻ)',
+    hostOnlyLockTitle: 'መራሒ ጥራይ እዩ ነዚ ክፍሊ ዘመሓድሮ',
+    hostOnlyLockDesc: 'ከም ተሳታፊ ትጻወት ኣለኻ። መራሒ ጥራይ ኮድ ይፈጥርን ኩዕሶ የውጽእን።',
+    hostNeedPassDesc: 'ክፍሊ ንምፍጣር መራሒ ግዜ ጸወታ ከንቅሕ ኣለዎ።',
+    hostBenefit1: 'ውሑስ ክፍሊት ብ Visa, Mastercard, Apple Pay ወይ Google Pay',
+    hostBenefit2: '1 ፍሉይ ኮድ ንነፍሲ ወከፍ ዙር',
+    hostBenefit3: 'ኩሎም ተሳተፍቲ ብኮድካ ብነጻ ይጻወቱ',
+    hostBenefit4: 'ተሳተፍቲ ብቀጥታ መልእኽቲ ክሰዱልካ ይኽእሉ',
+    payHostBtn: 'ፍቓድ መራሒ ኣንቅሕ',
+    hostProfileLabel: 'መንነት መራሒ',
+    activePaidBadge: '✓ ንጡፍ',
+    changeNameBtn: '✏️ ስም ቀይር',
+    hostNamePlaceholder: 'ስም መራሒ...',
+    spillCodePrefix: 'ኮድ ጸወታ',
+    leftSuffix: 'ተሪፉ',
+    cloudOpenBadge: '☁️ ኣብ ኩሉ ክፉት (ሰርቨር + ክላውድ)',
+    serverOpenBadge: '🟢 ንሞባይል ንጡፍ (ቢንጎን ኩዊዝን)',
+    syncingBadge: '⏳ ምስ ሰርቨር ይራኸብ ኣሎ...',
+    reactivateBtn: '🔄 ደጊምካ ኣንቅሕ',
+    newRoundBtnFull: 'ሓድሽ ዙር (1 ሓድሽ ኮድ)',
+    generateCodeBtn: 'ኮድ ፍጠር',
+    codeOpenAllScreens: '📡 ኮድ ተሳተፍቲ ኣብ ኩሉ ስክሪን ክፉት',
+    codeHiddenTvClickOpen: '🔒 ኮድ ኣብ ቲቪ ተሓቢኡ (ንምርኣይ ጠውቕ)',
+    codeMaskedMine: '🙈 ኮድ ኣብ ስክሪነይ ተሓቢኡ',
+    hideOnMyScreen: '🙈 ኣብ ስክሪነይ ሕባእ',
+    codePrivacyLine: '📡 ኮድ ክፍሊ ክፉት እዩ · ውልቃዊ መእተዊ መራሒ ኩሉ ግዜ ሕቡእ እዩ',
+    shareTipPrefix: '💡 ኮድ ወይ ሊንክ ኣካፍል: ኮድ',
+    realtimeLabel: 'ቀጥታ',
+    kickBtn: '🚫 ኣውጽእ (10 ደቂቕ)',
+    bannedHeader: '🛡️ ንግዚኡ ዝተኣገዱ',
+    autoExpiryNote: '10 ደቂቕ',
+    unbanBtn: '✓ ምለስ',
+    banRemainingPrefix: 'ተኣጊዱ ን',
+    banMinutesSuffix: 'ደቂቕ',
+    expiredBadge: 'ወዲኡ',
+    msgIntroTitle: 'ቀጥታ መልእኽቲ ምስ መራሒ:',
+    msgIntroBody: 'ተጻወትቲ ሕቶታት ወይ ሰላምታ ንመራሒ ክሰዱ ይኽእሉ።',
+    msgEmptyTitle: 'ክሳብ ሕጂ መልእኽቲ የለን።',
+    msgEmptyHint: 'ንመራሒ ሕቶ ወይ ሰላምታ ስደድ!',
+    msgHostPlaceholder: 'ከም መራሒ ንክፍሊ መልስ...',
+    msgPlayerPlaceholder: 'ንመራሒ መልእኽቲ ጽሓፍ...',
+    sendBtn: 'ስደድ',
+    footerBrand: 'ርሑቕ ቢንጎ • ቀጥታ ምትእስሳር',
+    codeAfterPay: 'ምስ ጀመረ ኮድ ይፍጠር',
+    confirmNewRoundText: 'ሓድሽ ዙር ክጅምር? ዝተሳሕቡ ኩዕሶታት ይጸርዩ።',
+    confirmKickText: 'ን {name} ን10 ደቂቕ ካብ ክፍሊ ክተውጽኦ?',
+    confirmYes: 'እወ፡ ኣረጋግጽ',
+    hostLabelSuffix: 'መራሒ',
+    youLabel: 'ንስኻ',
+    badNickErr: 'በጃኻ ጽቡቕ ሳጓ ምረጽ።',
+    joinFailErr: 'ናብ ክፍሊ ክራኸብ ኣይከኣለን።',
+    connectedNotice: '🎉 ናብ ክፍሊ {code} ከም {name} ተራኺብካ!',
+    codeLockedErr: 'ኣብ ሓደ ዙር ሓደ ኮድ ጥራይ ይፍጠር።',
+    newCodeNotice: 'ሓድሽ ኮድ: {code}',
+    roundStartedNotice: 'ሓድሽ ዙር ጀሚሩ! ኮድ: {code}',
+    kickedNotice: '🚫 {name} ን10 ደቂቕ ተኣጊዱ።',
+    unbannedNotice: '✅ {name} እንደገና ክኣቱ ይኽእል!',
+    hostNameUpdated: 'ስም መራሒ ናብ {name} ተቀዪሩ!',
+    codeReactivatedNotice: '🔄 ኮድ {code} ንኹሎም ተራኺቡ!',
+    marksSuffix: 'ምልክት',
+  },
+  ar: {
+    subtitle: 'العبوا معًا عن بُعد من الهاتف أو الكمبيوتر أو الشاشة الكبيرة',
+    messagesTab: 'الرسائل',
+    lockedBadge: 'مقفل',
+    switchBigScreen: 'التبديل إلى الشاشة الكبيرة',
+    connectedRoomPrefix: 'أنت متصل بالغرفة:',
+    chooseModeHint: 'اختر اللعب بالبينغو الكلاسيكي بالأرقام أو بينغو الموسيقى الرقمي!',
+    numbersBingoBtn: '🎱 بينغو الأرقام الكلاسيكي',
+    musicBingoBtn: '🎵 لوحة بينغو الموسيقى',
+    sendMsgHostBtn: 'إرسال رسالة إلى المنظم',
+    enterCodeHint: 'يتم الحصول عليه من المنظم أو الشاشة الكبيرة.',
+    nickLabel: 'الاسم المستعار (بدون بريد إلكتروني أو تسجيل):',
+    nickPlaceholder: 'مثال: الأسد، النجم، أو عائلة حسن',
+    kahootTitle: 'مجاني للأطفال والعائلة والضيوف:',
+    kahootBody: 'قام المنظم بتفعيل الفعالية. لا حاجة لحساب أو بريد أو دفع — فقط أدخل الرمز واسمك!',
+    wellbeingNote: 'هذا التطبيق للمتعة والتواصل الاجتماعي فقط. الكلمات غير اللائقة تؤدي إلى إيقاف تلقائي لمدة 10 دقائق.',
+    joinAction: 'الانضمام لغرفة المنظم (مجانًا بالرمز)',
+    hostOnlyLockTitle: 'المنظم فقط يدير الغرفة والرمز',
+    hostOnlyLockDesc: 'أنت تشارك كلاعب. المنظم فقط يمكنه إنشاء الرموز وسحب الكرات.',
+    hostNeedPassDesc: 'لإنشاء غرفة ومشاركة رمز، يجب على المنظم تفعيل وقت اللعب.',
+    hostBenefit1: 'دفع آمن عبر Visa وMastercard وApple Pay وGoogle Pay',
+    hostBenefit2: 'رمز فريد واحد لكل جولة',
+    hostBenefit3: 'جميع المشاركين يلعبون مجانًا برمزك',
+    hostBenefit4: 'يمكن للمشاركين إرسال رسائل مباشرة إليك',
+    payHostBtn: 'تفعيل صلاحية المنظم (بطاقة / Apple Pay / Google Pay)',
+    hostProfileLabel: 'ملف المنظم',
+    activePaidBadge: '✓ نشط ومدفوع',
+    changeNameBtn: '✏️ تعديل الاسم',
+    hostNamePlaceholder: 'أدخل اسم المنظم...',
+    spillCodePrefix: 'رمز اللعبة',
+    leftSuffix: 'متبقي',
+    cloudOpenBadge: '☁️ متاح في كل مكان (الخادم + السحابة)',
+    serverOpenBadge: '🟢 مفعّل على الخادم للجوال (بينغو وكويز)',
+    syncingBadge: '⏳ جاري مزامنة الغرفة...',
+    reactivateBtn: '🔄 إعادة تفعيل',
+    newRoundBtnFull: 'جولة جديدة (رمز جديد)',
+    generateCodeBtn: 'إنشاء رمز',
+    codeOpenAllScreens: '📡 رمز المشاركين ظاهر على كل الشاشات',
+    codeHiddenTvClickOpen: '🔒 رمز المشاركين مخفي على التلفاز (اضغط للفتح)',
+    codeMaskedMine: '🙈 الرمز مخفي على شاشتي',
+    hideOnMyScreen: '🙈 إخفاء على شاشتي',
+    codePrivacyLine: '📡 رمز الغرفة مفتوح للجميع · دخول المنظم والإجابات خاصة دائمًا',
+    shareTipPrefix: '💡 شارك الرمز أو الرابط: الرمز',
+    realtimeLabel: 'مباشر',
+    kickBtn: '🚫 إبعاد (10 دقائق)',
+    bannedHeader: '🛡️ الموقوفون مؤقتًا',
+    autoExpiryNote: 'ينتهي تلقائيًا بعد 10 دقائق',
+    unbanBtn: '✓ رفع الإيقاف',
+    banRemainingPrefix: 'متوقف لمدة',
+    banMinutesSuffix: 'دقيقة أخرى',
+    expiredBadge: 'منتهي',
+    msgIntroTitle: 'رسائل مباشرة مع المنظم:',
+    msgIntroBody: 'يمكن للاعبين إرسال أسئلة أو تحيات للمنظم والرد مباشرة.',
+    msgEmptyTitle: 'لا توجد رسائل بعد.',
+    msgEmptyHint: 'أرسل سؤالاً أو تحية للمنظم!',
+    msgHostPlaceholder: 'الرد كمنظم على الغرفة...',
+    msgPlayerPlaceholder: 'اكتب رسالة للمنظم...',
+    sendBtn: 'إرسال',
+    footerBrand: 'بينغو عن بُعد • مزامنة فورية',
+    codeAfterPay: 'يتم إنشاء الرمز عند البدء',
+    confirmNewRoundText: 'بدء جولة جديدة؟ سيتم تصفير الكرات المسحوبة للغرفة بأكملها.',
+    confirmKickText: 'هل تريد إبعاد {name} لمدة 10 دقائق للحفاظ على الأجواء الإيجابية؟',
+    confirmYes: 'نعم، تأكيد',
+    hostLabelSuffix: 'المنظم',
+    youLabel: 'أنت',
+    badNickErr: 'يرجى اختيار اسم لطيف ومناسب للعائلة.',
+    joinFailErr: 'تعذر الاتصال بالغرفة.',
+    connectedNotice: '🎉 تم الاتصال بالغرفة {code} باسم {name}!',
+    codeLockedErr: 'يتم إنشاء رمز واحد فقط لكل جولة نشطة.',
+    newCodeNotice: 'تم إنشاء رمز جديد: {code}',
+    roundStartedNotice: 'بدأت جولة جديدة! الرمز: {code}',
+    kickedNotice: '🚫 تم إبعاد {name} لمدة 10 دقائق.',
+    unbannedNotice: '✅ تم رفع الإيقاف عن {name}!',
+    hostNameUpdated: 'تم تحديث اسم المنظم إلى {name}!',
+    codeReactivatedNotice: '🔄 تمت مزامنة الرمز {code} للجميع!',
+    marksSuffix: 'علامات',
+  },
+};
 
 export interface HostMessageItem {
   id: string;
@@ -47,6 +751,12 @@ export const RemoteBingoModal: React.FC<RemoteBingoModalProps> = ({
   onOpenTvMode,
   onStartNewRound,
 }) => {
+  const { lang } = useTranslation();
+  const ui = getBingoUiTexts(lang);
+  const ex = REMOTE_EXTRA[lang] || REMOTE_EXTRA.nb;
+  const langRef = useRef(lang);
+  langRef.current = lang;
+
   const [authUser, setAuthUser] = useState<AuthUser>(() => authService.getCurrentUser());
   const isOwnerNow = ownerControl.isUnlocked();
   const [hasPaid, setHasPaid] = useState<boolean>(
@@ -61,6 +771,11 @@ export const RemoteBingoModal: React.FC<RemoteBingoModalProps> = ({
   const [inputName, setInputName] = useState(remoteBingo.getPlayerName() || '');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successNotice, setSuccessNotice] = useState<string | null>(null);
+  const [confirmAction, setConfirmAction] = useState<
+    | { type: 'new_round' }
+    | { type: 'kick'; participant: RemoteParticipant }
+    | null
+  >(null);
   const [isJoining, setIsJoining] = useState(false);
   const [copied, setCopied] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
@@ -107,7 +822,7 @@ export const RemoteBingoModal: React.FC<RemoteBingoModalProps> = ({
   const hostDisplayName =
     (authUser.isAuthenticated && authUser.name && authUser.name !== 'Gjest' ? authUser.name : '') ||
     remoteBingo.getHostName() ||
-    'Arrangør';
+    ui.host;
 
   useEffect(() => {
     if (isOpen) {
@@ -157,12 +872,16 @@ export const RemoteBingoModal: React.FC<RemoteBingoModalProps> = ({
 
     const unsubJoinAlert = remoteBingo.onParticipantJoined((p, total) => {
       if (remoteBingo.getIsRemotePlayer() || !remoteBingo.canActAsHost()) return;
+      const curLang = langRef.current;
+      const curUi = getBingoUiTexts(curLang);
       sounds.playPop(1.25);
       const id = `join-${Date.now()}`;
+      const joinMsg = curUi.participantJoinedRoom.replace('{name}', p.name);
+      const countMsg = curUi.remoteConnectedCount.replace('{n}', String(total));
       setLiveHostAlert({
         id,
         type: 'join',
-        text: `👋 ${p.name} ble med i rommet (${p.game || 'Avstandsbingo'})! Totalt ${total} tilkoblet.`,
+        text: `${joinMsg} (${countMsg})`,
       });
       setHostNotifications(remoteBingo.getHostNotifications());
       setTimeout(() => {
@@ -171,31 +890,41 @@ export const RemoteBingoModal: React.FC<RemoteBingoModalProps> = ({
     });
 
     const unsubClaimAlert = remoteBingo.onClaim((claim) => {
+      const curLang = langRef.current;
+      const curUi = getBingoUiTexts(curLang);
       const tier =
         claim.milestone ||
-        (claim.isFullHouse || /fullbrett/i.test(claim.pattern)
+        (claim.isFullHouse || /fullt?\s*brett|full_?house|blackout/i.test(claim.pattern)
           ? 'fullbrett'
-          : /3\s*\.?\s*rekke/i.test(claim.pattern)
+          : /3\s*\.?\s*rekke|3\s*lines?/i.test(claim.pattern)
           ? 'line3'
           : 'line1');
-      const tierLabel = tier === 'fullbrett' ? 'Fullt brett' : tier === 'line3' ? '3. rekker' : '1. rekke';
+      const tierLabel = formatMilestoneLabel(tier, curLang);
       const nextText =
         tier === 'fullbrett'
-          ? 'Ny runde starter!'
+          ? curUi.newRoundStartsSoon
           : tier === 'line3'
-          ? 'Spillet fortsetter til Full brett!'
-          : 'Spillet fortsetter til 3. rekker!';
+          ? curUi.continuesToFullbrett
+          : curUi.continuesToLine3;
       sounds.playLineComplete();
       const id = `claim-${Date.now()}`;
       setLiveHostAlert({
         id,
         type: 'bingo',
-        text: `🏆 ${claim.playerName} har fylt ${tierLabel} og trykket BINGO! ➡️ ${nextText}`,
+        text: `${curUi.shoutedBannerPrefix} ${claim.playerName} ${curUi.shoutedBannerMid} ${tierLabel} ${curUi.shoutedBannerSuffix} ➡️ ${nextText}`,
       });
       setHostNotifications(remoteBingo.getHostNotifications());
       setTimeout(() => {
         setLiveHostAlert((prev) => (prev?.id === id ? null : prev));
       }, 8000);
+    });
+
+    const unsubRemoteNewRound = remoteBingo.onNewRound((nr) => {
+      const curUi = getBingoUiTexts(langRef.current);
+      setLiveHostAlert(null);
+      setRoundNumber(nr.roundNumber);
+      setSuccessNotice(curUi.roundManualResetMsg.replace('{n}', String(nr.roundNumber)));
+      setTimeout(() => setSuccessNotice(null), 3500);
     });
 
     const unsubMusic = musicBingoService.subscribe(() => {
@@ -204,23 +933,40 @@ export const RemoteBingoModal: React.FC<RemoteBingoModalProps> = ({
     });
 
     const unsubMusicClaim = musicBingoService.onClaim((mClaim) => {
+      const curLang = langRef.current;
+      const curUi = getBingoUiTexts(curLang);
       sounds.playLineComplete();
-      const isFull = /fullt?\s*brett/i.test(mClaim.pattern);
-      const nextText = isFull
-        ? 'Ny runde kan startes!'
-        : /3\s*\.?\s*rekke/i.test(mClaim.pattern)
-        ? 'Spillet fortsetter til Fullt brett!'
-        : 'Spillet fortsetter til 3. rekker!';
+      const tier =
+        mClaim.milestone ||
+        (mClaim.isFullHouse || /fullt?\s*brett|full_?house|blackout/i.test(mClaim.pattern)
+          ? 'fullbrett'
+          : /3\s*\.?\s*rekke|3\s*lines?/i.test(mClaim.pattern)
+          ? 'line3'
+          : 'line1');
+      const tierLabel = localizeBingoPattern(mClaim.pattern, curLang);
+      const nextText =
+        tier === 'fullbrett'
+          ? curUi.newRoundStartsSoon
+          : tier === 'line3'
+          ? curUi.continuesToFullbrett
+          : curUi.continuesToLine3;
       const id = `mclaim-${Date.now()}`;
       setLiveHostAlert({
         id,
         type: 'bingo',
-        text: `🎵 ${mClaim.playerName} fylte ${mClaim.pattern} og trykket MUSIKKBINGO! ➡️ ${nextText}`,
+        text: `🎵 ${mClaim.playerName} ${curUi.shoutedBannerMid} ${tierLabel} ${curUi.shoutedBannerSuffix} ➡️ ${nextText}`,
       });
       setHostNotifications(remoteBingo.getHostNotifications());
       setTimeout(() => {
         setLiveHostAlert((prev) => (prev?.id === id ? null : prev));
       }, 8000);
+    });
+
+    const unsubMusicNewRound = musicBingoService.onNewRound((nr) => {
+      const curUi = getBingoUiTexts(langRef.current);
+      setLiveHostAlert(null);
+      setSuccessNotice(curUi.musicNewRoundNotice.replace('{n}', String(nr.roundNumber)));
+      setTimeout(() => setSuccessNotice(null), 3500);
     });
 
     const unsubSession = sessionTimer.subscribe(() => {
@@ -244,12 +990,13 @@ export const RemoteBingoModal: React.FC<RemoteBingoModalProps> = ({
     // Listen for participant messages to host and replies
     const unsubHostMsg = socialSocket.on('host:message_received', (payload: any) => {
       if (payload && payload.text) {
+        const curUi = getBingoUiTexts(langRef.current);
         setMessages((prev) => [
           ...prev,
           {
             id: payload.id || `msg-${Date.now()}`,
             senderId: payload.senderId,
-            senderName: payload.senderName || 'Deltaker',
+            senderName: payload.senderName || curUi.player,
             senderColor: payload.senderColor || '#06b6d4',
             text: payload.text,
             timestamp: payload.timestamp || Date.now(),
@@ -261,11 +1008,12 @@ export const RemoteBingoModal: React.FC<RemoteBingoModalProps> = ({
 
     const unsubHostReply = socialSocket.on('host:reply_received', (payload: any) => {
       if (payload && payload.text) {
+        const curUi = getBingoUiTexts(langRef.current);
         setMessages((prev) => [
           ...prev,
           {
             id: payload.id || `rep-${Date.now()}`,
-            senderName: payload.hostName || hostDisplayName || 'Bingovert / Arrangør',
+            senderName: payload.hostName || hostDisplayName || curUi.host,
             senderColor: '#f59e0b',
             text: payload.text,
             timestamp: payload.timestamp || Date.now(),
@@ -279,8 +1027,10 @@ export const RemoteBingoModal: React.FC<RemoteBingoModalProps> = ({
       unsubRemote();
       unsubJoinAlert();
       unsubClaimAlert();
+      unsubRemoteNewRound();
       unsubMusic();
       unsubMusicClaim();
+      unsubMusicNewRound();
       unsubSession();
       unsubAuth();
       unsubOwner();
@@ -298,7 +1048,7 @@ export const RemoteBingoModal: React.FC<RemoteBingoModalProps> = ({
     setErrorMessage(null);
     const modCheck = moderation.filterText(inputName.trim());
     if (modCheck.hasBannedWords) {
-      setErrorMessage('Vennligst velg et hyggelig og familievennlig kallenavn.');
+      setErrorMessage(ex.badNickErr);
       return;
     }
     const safeNick = modCheck.cleanText || inputName.trim();
@@ -308,12 +1058,14 @@ export const RemoteBingoModal: React.FC<RemoteBingoModalProps> = ({
     setIsJoining(false);
     if (!res.success) {
       sounds.playClick();
-      setErrorMessage(res.error || 'Kunne ikke koble til rommet.');
+      setErrorMessage(res.error ? localizeServerBingoMessage(res.error, lang) : ex.joinFailErr);
       return;
     }
 
     sounds.playLineComplete();
-    setSuccessNotice(`🎉 Tilkoblet rom ${inputCode.toUpperCase()} som ${safeNick}! Kulene synkroniseres direkte fra verten.`);
+    setSuccessNotice(
+      ex.connectedNotice.replace('{code}', inputCode.toUpperCase()).replace('{name}', safeNick)
+    );
     if (onJoinedAsRemotePlayer) {
       onJoinedAsRemotePlayer(inputCode.toUpperCase(), safeNick);
     }
@@ -351,7 +1103,7 @@ export const RemoteBingoModal: React.FC<RemoteBingoModalProps> = ({
     if (!canHost) return;
     sounds.playClick();
     if (remoteBingo.isCodeLockedForRound()) {
-      setErrorMessage('Koden genereres kun 1 gang per aktive runde. Start en ny runde for å generere ny kode.');
+      setErrorMessage(ex.codeLockedErr);
       setTimeout(() => setErrorMessage(null), 3500);
       return;
     }
@@ -359,40 +1111,33 @@ export const RemoteBingoModal: React.FC<RemoteBingoModalProps> = ({
     if (newCode) {
       setHostCode(newCode);
       setIsCodeLocked(remoteBingo.isCodeLockedForRound());
-      setSuccessNotice(`Ny spillkode generert for runden: ${newCode}`);
+      setSuccessNotice(ex.newCodeNotice.replace('{code}', newCode));
       setTimeout(() => setSuccessNotice(null), 2500);
     }
   };
 
-  const handleStartNewRoundCode = () => {
+  const executeStartNewRoundCode = () => {
     if (!canHost) return;
-    sounds.playClick();
-    const confirmNew = window.confirm(
-      'Starte ny runde? Dette nullstiller trukne kuler og genererer 1 ny spillkode for den nye runden.'
-    );
-    if (!confirmNew) return;
+    sounds.playLineComplete();
+    setConfirmAction(null);
     if (onStartNewRound) onStartNewRound();
     const newCode = remoteBingo.startNewRound();
     if (newCode) {
       setHostCode(newCode);
       setIsCodeLocked(true);
-      setSuccessNotice(`Ny runde startet! Én ny spillkode ble generert: ${newCode}`);
+      setSuccessNotice(ex.roundStartedNotice.replace('{code}', newCode));
       setTimeout(() => setSuccessNotice(null), 3000);
     }
   };
 
-  const handleKickParticipant = (p: RemoteParticipant) => {
+  const executeKickParticipant = (p: RemoteParticipant) => {
     sounds.playClick();
-    const confirmKick = window.confirm(
-      `Er du sikker på at du vil utestenge ${p.name} i 10 minutter for å opprettholde sosial trivsel? Utestengelsen opphører automatisk etter 10 minutter, eller du kan oppheve den manuelt.`
-    );
-    if (confirmKick) {
-      remoteBingo.kickParticipant(p.id, p.name);
-      ownerControl.banParticipant(p.name, 'Forstyrrelse av fellesskapet (10 min auto-utestengelse)');
-      setBannedList(ownerControl.getBannedParticipants());
-      setSuccessNotice(`🚫 ${p.name} ble utestengt i 10 minutter for å bevare sosial trivsel.`);
-      setTimeout(() => setSuccessNotice(null), 3500);
-    }
+    setConfirmAction(null);
+    remoteBingo.kickParticipant(p.id, p.name);
+    ownerControl.banParticipant(p.name, ex.autoExpiryNote);
+    setBannedList(ownerControl.getBannedParticipants());
+    setSuccessNotice(ex.kickedNotice.replace('{name}', p.name));
+    setTimeout(() => setSuccessNotice(null), 3500);
   };
 
   const handleUnban = (banned: BannedParticipant) => {
@@ -400,7 +1145,7 @@ export const RemoteBingoModal: React.FC<RemoteBingoModalProps> = ({
     ownerControl.unbanParticipant(banned.name);
     socialSocket.unbanUser(banned.id);
     setBannedList(ownerControl.getBannedParticipants());
-    setSuccessNotice(`✅ Utestengelse av ${banned.name} ble opphevet. Spilleren kan nå delta igjen!`);
+    setSuccessNotice(ex.unbannedNotice.replace('{name}', banned.name));
     setTimeout(() => setSuccessNotice(null), 3000);
   };
 
@@ -411,8 +1156,7 @@ export const RemoteBingoModal: React.FC<RemoteBingoModalProps> = ({
     sounds.playClick();
     const isHost = activeTab === 'host' || !isRemote;
     if (isHost) {
-      // Host sends reply or announcement with actual arrangør profile name
-      const senderLabel = `${hostDisplayName} (Arrangør)`;
+      const senderLabel = `${hostDisplayName} (${ex.hostLabelSuffix})`;
       socialSocket.replyHostMessage(replyTarget || 'all', msgInput.trim(), senderLabel);
       setMessages((prev) => [
         ...prev,
@@ -427,13 +1171,12 @@ export const RemoteBingoModal: React.FC<RemoteBingoModalProps> = ({
       ]);
       setReplyTarget(null);
     } else {
-      // Participant sends message to host
       socialSocket.sendHostMessage(msgInput.trim());
       setMessages((prev) => [
         ...prev,
         {
           id: `msg-${Date.now()}`,
-          senderName: inputName || remoteBingo.getPlayerName() || 'Deg',
+          senderName: inputName || remoteBingo.getPlayerName() || ex.youLabel,
           senderColor: '#06b6d4',
           text: msgInput.trim(),
           timestamp: Date.now(),
@@ -457,7 +1200,6 @@ export const RemoteBingoModal: React.FC<RemoteBingoModalProps> = ({
           activeTab === 'join' && participantBoardMode === 'music_bingo' ? 'max-w-3xl' : 'max-w-xl'
         }`}
       >
-        
         {/* Header */}
         <div className="flex items-center justify-between pb-3 border-b border-amber-500/20">
           <div className="flex items-center gap-3">
@@ -466,10 +1208,10 @@ export const RemoteBingoModal: React.FC<RemoteBingoModalProps> = ({
             </div>
             <div>
               <h2 className="font-heading font-black text-xl sm:text-2xl text-amber-200">
-                Avstandsbingo & Fellesskap
+                {ui.remoteModalTitle}
               </h2>
               <p className="text-xs text-amber-300/80">
-                Spill sammen på avstand fra mobil, PC eller storskjerm
+                {ex.subtitle}
               </p>
             </div>
           </div>
@@ -484,10 +1226,9 @@ export const RemoteBingoModal: React.FC<RemoteBingoModalProps> = ({
                   onSwitchToBigScreen();
                 }}
                 className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-amber-400 to-amber-500 hover:brightness-110 text-slate-950 font-black text-xs cursor-pointer shadow flex items-center gap-1.5"
-                title="Bytt fritt til Storskjerm uten ny betaling eller innlogging"
               >
                 <span>📺</span>
-                <span className="hidden sm:inline">Bytt til Storskjerm</span>
+                <span className="hidden sm:inline">{ex.switchBigScreen}</span>
               </button>
             )}
             <button
@@ -496,7 +1237,7 @@ export const RemoteBingoModal: React.FC<RemoteBingoModalProps> = ({
                 onClose();
               }}
               className="w-9 h-9 rounded-xl bg-black/40 hover:bg-black/60 border border-amber-500/30 flex items-center justify-center text-amber-300 hover:text-white transition-all text-sm font-bold cursor-pointer"
-              title="Lukk"
+              title={ui.close}
             >
               ✕
             </button>
@@ -517,7 +1258,7 @@ export const RemoteBingoModal: React.FC<RemoteBingoModalProps> = ({
             }`}
           >
             <span>📱</span>
-            <span>Spiller</span>
+            <span>{ui.player}</span>
           </button>
 
           <button
@@ -533,8 +1274,12 @@ export const RemoteBingoModal: React.FC<RemoteBingoModalProps> = ({
             }`}
           >
             <span>👑</span>
-            <span>Arrangør / Vert</span>
-            {!hasPaid && <span className="text-[10px] bg-rose-900/80 text-rose-200 px-1.5 py-0.2 rounded-full border border-rose-500/40">Låst</span>}
+            <span>{ui.host}</span>
+            {!hasPaid && (
+              <span className="text-[10px] bg-rose-900/80 text-rose-200 px-1.5 py-0.2 rounded-full border border-rose-500/40">
+                {ex.lockedBadge}
+              </span>
+            )}
             {hasPaid && unreadHostAlerts > 0 && activeTab !== 'host' && (
               <span className="px-1.5 py-0.2 rounded-full bg-emerald-400 text-slate-950 text-[9px] font-black">
                 {unreadHostAlerts}
@@ -554,7 +1299,7 @@ export const RemoteBingoModal: React.FC<RemoteBingoModalProps> = ({
             }`}
           >
             <span>💬</span>
-            <span>Meldinger</span>
+            <span>{ex.messagesTab}</span>
             {messages.length > 0 && (
               <span className="w-4 h-4 rounded-full bg-amber-400 text-black text-[9px] font-black flex items-center justify-center">
                 {messages.length}
@@ -562,6 +1307,39 @@ export const RemoteBingoModal: React.FC<RemoteBingoModalProps> = ({
             )}
           </button>
         </div>
+
+        {/* Inline Confirmation Prompt */}
+        {confirmAction && (
+          <div className="mb-3 p-3.5 rounded-xl bg-amber-950/90 border-2 border-amber-400 text-xs space-y-2.5 shadow-xl animate-fadeIn">
+            <div className="font-bold text-amber-100">
+              {confirmAction.type === 'new_round'
+                ? ex.confirmNewRoundText
+                : ex.confirmKickText.replace('{name}', confirmAction.participant.name)}
+            </div>
+            <div className="flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setConfirmAction(null)}
+                className="px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-amber-200 font-bold cursor-pointer"
+              >
+                {ui.cancel}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (confirmAction.type === 'new_round') {
+                    executeStartNewRoundCode();
+                  } else {
+                    executeKickParticipant(confirmAction.participant);
+                  }
+                }}
+                className="px-3 py-1.5 rounded-lg bg-amber-400 hover:bg-amber-300 text-slate-950 font-black cursor-pointer"
+              >
+                {ex.confirmYes}
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Live Host Alert Banner inside Modal */}
         {liveHostAlert && (
@@ -605,11 +1383,12 @@ export const RemoteBingoModal: React.FC<RemoteBingoModalProps> = ({
                   <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-400/40 text-center space-y-3">
                     <span className="text-3xl">🟢</span>
                     <div className="font-heading font-black text-lg text-amber-200">
-                      Du er tilkoblet rom: <span className="text-amber-400 underline font-mono">{currentRoom}</span>
+                      {ex.connectedRoomPrefix}{' '}
+                      <span className="text-amber-400 underline font-mono">{currentRoom}</span>
                     </div>
                     <p className="text-xs text-amber-100/90 leading-relaxed">
-                      Spillernavn: <strong className="text-white">{remoteBingo.getPlayerName()}</strong>.
-                      Velg om du vil spille vanlig Tallbingo eller Digitalt Musikkbingo-brett!
+                      {ui.remotePlayingAs} <strong className="text-white">{remoteBingo.getPlayerName()}</strong>.{' '}
+                      {ex.chooseModeHint}
                     </p>
 
                     <div className="grid grid-cols-2 gap-2 pt-1">
@@ -625,7 +1404,7 @@ export const RemoteBingoModal: React.FC<RemoteBingoModalProps> = ({
                             : 'bg-black/45 text-amber-200 border-amber-500/30 hover:bg-black/65'
                         }`}
                       >
-                        🎱 Vanlig Tallbingo
+                        {ex.numbersBingoBtn}
                       </button>
                       <button
                         type="button"
@@ -639,7 +1418,7 @@ export const RemoteBingoModal: React.FC<RemoteBingoModalProps> = ({
                             : 'bg-black/45 text-rose-200 border-rose-400/40 hover:bg-black/65'
                         }`}
                       >
-                        🎵 Musikkbingo-brett
+                        {ex.musicBingoBtn}
                       </button>
                     </div>
 
@@ -649,13 +1428,13 @@ export const RemoteBingoModal: React.FC<RemoteBingoModalProps> = ({
                         className="px-4 py-2 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-400/50 text-amber-200 text-xs font-bold cursor-pointer transition-all flex items-center gap-1.5"
                       >
                         <span>💬</span>
-                        <span>Send melding til arrangør</span>
+                        <span>{ex.sendMsgHostBtn}</span>
                       </button>
                       <button
                         onClick={handleLeaveRemote}
                         className="px-4 py-2 rounded-xl bg-rose-600/30 hover:bg-rose-600/50 border border-rose-400/40 text-rose-200 text-xs font-bold cursor-pointer transition-all"
                       >
-                        Koble fra / Forlat rommet
+                        {ui.remoteLeaveRoomBtn}
                       </button>
                     </div>
                   </div>
@@ -663,7 +1442,7 @@ export const RemoteBingoModal: React.FC<RemoteBingoModalProps> = ({
                   {participantBoardMode === 'music_bingo' && (
                     <DigitalMusicBingoBoard
                       roomCode={currentRoom}
-                      playerName={remoteBingo.getPlayerName() || inputName || 'Deltaker'}
+                      playerName={remoteBingo.getPlayerName() || inputName || ui.player}
                     />
                   )}
                 </div>
@@ -672,30 +1451,30 @@ export const RemoteBingoModal: React.FC<RemoteBingoModalProps> = ({
                   <div className="p-4 rounded-2xl bg-black/40 border border-amber-500/30 space-y-3">
                     <div>
                       <label className="block text-xs font-bold text-amber-200 uppercase tracking-wider mb-1.5">
-                        Vertens 4-sifrede spillkode:
+                        {ui.remoteCodeLabel}:
                       </label>
                       <input
                         type="text"
                         maxLength={8}
-                        placeholder="f.eks. 7842"
+                        placeholder={ui.remoteCodePlaceholder}
                         value={inputCode}
                         onChange={(e) => setInputCode(e.target.value.toUpperCase())}
                         required
                         className="w-full px-4 py-3 rounded-xl bg-black/60 border border-amber-400/40 focus:border-amber-400 text-amber-100 placeholder-amber-400/30 font-mono font-black text-center text-2xl tracking-widest outline-none shadow-inner"
                       />
                       <span className="text-[11px] text-amber-300/70 mt-1 block">
-                        Fås fra bingoverten, storskjermen eller publikumsvisningen.
+                        {ex.enterCodeHint}
                       </span>
                     </div>
 
                     <div>
                       <label className="block text-xs font-bold text-amber-200 uppercase tracking-wider mb-1.5">
-                        Kallenavn (ingen e-post eller innlogging):
+                        {ex.nickLabel}
                       </label>
                       <input
                         type="text"
                         maxLength={24}
-                        placeholder="f.eks. Løve, Stjerne eller Familien Hansen"
+                        placeholder={ex.nickPlaceholder}
                         value={inputName}
                         onChange={(e) => setInputName(e.target.value)}
                         required
@@ -707,13 +1486,13 @@ export const RemoteBingoModal: React.FC<RemoteBingoModalProps> = ({
                   <div className="p-3.5 rounded-xl bg-cyan-950/70 border border-cyan-400/50 text-xs text-cyan-200/90 leading-relaxed flex items-start gap-2.5">
                     <span className="text-xl shrink-0">🎟️</span>
                     <div>
-                      <strong className="text-white block font-bold mb-0.5">Kahoot-modus — Gratis for barn, familie & gjester:</strong>
-                      Arrangøren har betalt for arrangementet. Du trenger ingen konto, ingen e-post og ingen betaling — tast bare koden og et kallenavn!
+                      <strong className="text-white block font-bold mb-0.5">{ex.kahootTitle}</strong>
+                      {ex.kahootBody}
                     </div>
                   </div>
 
                   <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-xs text-amber-200/90 leading-relaxed">
-                    ✨ <strong>Sosial trivsel:</strong> Appen er kun for glede og sosialt samvær. Upassende ord eller forstyrrelser tolereres ikke og fører til automatisk 10-minutters utestengelse.
+                    ✨ <strong>{ui.wellbeingTitle}:</strong> {ex.wellbeingNote}
                   </div>
 
                   <button
@@ -722,17 +1501,16 @@ export const RemoteBingoModal: React.FC<RemoteBingoModalProps> = ({
                     className="w-full py-3.5 px-4 rounded-2xl bg-gradient-to-r from-amber-500 via-amber-400 to-amber-500 hover:from-amber-400 hover:to-amber-300 text-black font-black text-sm tracking-wide shadow-lg shadow-amber-500/30 hover:scale-[1.01] active:scale-[0.99] transition-all cursor-pointer flex items-center justify-center gap-2 disabled:opacity-60"
                   >
                     <span>🚀</span>
-                    <span>{isJoining ? 'Kobler til aktivt spillrom...' : 'Koble til vertens spillrom (Gratis med kode)'}</span>
+                    <span>{isJoining ? ui.remoteJoiningBtn : ex.joinAction}</span>
                   </button>
                 </form>
               )}
             </div>
           )}
 
-          {/* TAB 2: HOST CONTROLS (STRICT PAYMENT REQUIREMENT & NEVER FOR PARTICIPANTS) */}
+          {/* TAB 2: HOST CONTROLS */}
           {activeTab === 'host' && (
             <div className="space-y-4">
-              {/* STRICT PAYMENT & HOST GATE */}
               {!canHost ? (
                 <div className="p-5 rounded-2xl bg-gradient-to-b from-rose-950/70 via-black/60 to-black/80 border-2 border-rose-500/60 text-center space-y-4 animate-fadeIn">
                   <div className="w-14 h-14 mx-auto rounded-2xl bg-rose-500/20 border-2 border-rose-400 flex items-center justify-center text-3xl shadow-lg">
@@ -740,29 +1518,25 @@ export const RemoteBingoModal: React.FC<RemoteBingoModalProps> = ({
                   </div>
                   <div>
                     <h3 className="font-heading font-black text-lg text-rose-200">
-                      {isRemote
-                        ? 'Kun arrangøren styrer spillrommet og spillkoden'
-                        : 'Arrangørpass kreves for Avstandsbingo & Storskjerm'}
+                      {isRemote ? ex.hostOnlyLockTitle : ui.remoteHostLockedTitle}
                     </h3>
                     <p className="text-xs text-amber-100/80 mt-1 max-w-md mx-auto leading-relaxed">
-                      {isRemote
-                        ? 'Du deltar som spiller. Bare arrangøren kan generere spillkoder (1 per runde), trekke kuler og styre rommet.'
-                        : 'For å opprette spillrom, få spillkode og arrangere avstandsbingo eller storskjermbingo må verten betale for spilletiden med Visa, Mastercard, Apple Pay eller Google Pay.'}
+                      {isRemote ? ex.hostOnlyLockDesc : ex.hostNeedPassDesc}
                     </p>
                   </div>
 
                   <div className="p-3.5 rounded-xl bg-black/60 border border-amber-500/30 text-left text-xs space-y-2">
                     <div className="flex items-center gap-2 text-amber-300 font-bold">
-                      <span>✓</span> Sikker betaling med Visa, Mastercard, Apple Pay eller Google Pay
+                      <span>✓</span> {ex.hostBenefit1}
                     </div>
                     <div className="flex items-center gap-2 text-amber-300 font-bold">
-                      <span>✓</span> 1 unik spillkode per betalte spilletid
+                      <span>✓</span> {ex.hostBenefit2}
                     </div>
                     <div className="flex items-center gap-2 text-amber-300 font-bold">
-                      <span>✓</span> Alle dine deltakere spiller helt gratis med koden din
+                      <span>✓</span> {ex.hostBenefit3}
                     </div>
                     <div className="flex items-center gap-2 text-amber-300 font-bold">
-                      <span>✓</span> Deltakere kan sende meldinger direkte til deg som vert
+                      <span>✓</span> {ex.hostBenefit4}
                     </div>
                   </div>
 
@@ -776,12 +1550,12 @@ export const RemoteBingoModal: React.FC<RemoteBingoModalProps> = ({
                     className="w-full py-3.5 px-4 rounded-2xl bg-gradient-to-r from-emerald-500 via-emerald-600 to-teal-600 hover:brightness-110 text-white font-black text-sm tracking-wide shadow-xl shadow-emerald-900/30 active:scale-98 cursor-pointer flex items-center justify-center gap-2.5"
                   >
                     <span className="text-base">💳</span>
-                    <span>Betal arrangørpass (Kort / Apple Pay / Google Pay)</span>
+                    <span>{ex.payHostBtn}</span>
                   </button>
                 </div>
               ) : (
                 <>
-                  {/* Arrangør-profil (navn & rolle) */}
+                  {/* Host profile */}
                   <div className="p-3.5 rounded-2xl bg-gradient-to-r from-purple-950/60 via-black/60 to-amber-950/50 border border-purple-400/40 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                     <div className="flex items-center gap-3">
                       <div
@@ -793,10 +1567,10 @@ export const RemoteBingoModal: React.FC<RemoteBingoModalProps> = ({
                       <div>
                         <div className="flex items-center gap-2">
                           <span className="text-[10px] uppercase tracking-wider font-black text-purple-300">
-                            Arrangørprofil
+                            {ex.hostProfileLabel}
                           </span>
                           <span className="px-1.5 py-0.2 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-400/40 text-[9px] font-black">
-                            ✓ Aktiv & Betalt
+                            {ex.activePaidBadge}
                           </span>
                         </div>
                         {isEditingHostName ? (
@@ -808,7 +1582,7 @@ export const RemoteBingoModal: React.FC<RemoteBingoModalProps> = ({
                               const updated = authService.updateUserName(hostNameDraft.trim());
                               remoteBingo.setHostName(updated.name);
                               setIsEditingHostName(false);
-                              setSuccessNotice(`Arrangørnavn oppdatert til ${updated.name}!`);
+                              setSuccessNotice(ex.hostNameUpdated.replace('{name}', updated.name));
                               setTimeout(() => setSuccessNotice(null), 2500);
                             }}
                             className="flex items-center gap-1.5 mt-1"
@@ -817,7 +1591,7 @@ export const RemoteBingoModal: React.FC<RemoteBingoModalProps> = ({
                               type="text"
                               value={hostNameDraft}
                               onChange={(e) => setHostNameDraft(e.target.value)}
-                              placeholder="Skriv arrangørnavn..."
+                              placeholder={ex.hostNamePlaceholder}
                               maxLength={30}
                               autoFocus
                               className="px-2.5 py-1 rounded-lg bg-black/80 border border-amber-400 text-xs text-white font-bold outline-none"
@@ -826,7 +1600,7 @@ export const RemoteBingoModal: React.FC<RemoteBingoModalProps> = ({
                               type="submit"
                               className="px-2.5 py-1 rounded-lg bg-emerald-500 text-slate-950 font-black text-xs cursor-pointer"
                             >
-                              Lagre
+                              {ui.save}
                             </button>
                           </form>
                         ) : (
@@ -840,9 +1614,8 @@ export const RemoteBingoModal: React.FC<RemoteBingoModalProps> = ({
                                 setIsEditingHostName(true);
                               }}
                               className="text-[10px] px-2 py-0.5 rounded-lg bg-white/10 hover:bg-white/20 text-amber-200 font-bold cursor-pointer"
-                              title="Endre arrangørnavn"
                             >
-                              ✏️ Endre navn
+                              {ex.changeNameBtn}
                             </button>
                           </div>
                         )}
@@ -860,7 +1633,7 @@ export const RemoteBingoModal: React.FC<RemoteBingoModalProps> = ({
                         className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-amber-400 to-amber-500 hover:brightness-110 text-slate-950 font-black text-xs cursor-pointer shadow flex items-center justify-center gap-1.5 shrink-0"
                       >
                         <span>📺</span>
-                        <span>Bytt til Storskjerm</span>
+                        <span>{ex.switchBigScreen}</span>
                       </button>
                     )}
                   </div>
@@ -868,9 +1641,9 @@ export const RemoteBingoModal: React.FC<RemoteBingoModalProps> = ({
                   {/* Host Code & Controls */}
                   <div className="p-5 rounded-2xl bg-gradient-to-br from-amber-500/20 via-black/40 to-black/60 border-2 border-amber-400/60 text-center space-y-3">
                     <div className="flex items-center justify-between text-xs font-bold text-amber-300 uppercase tracking-widest px-1">
-                      <span>Spillkode · Arrangør: {hostDisplayName}</span>
+                      <span>{ex.spillCodePrefix} · {ui.host}: {hostDisplayName}</span>
                       <span className="text-[11px] text-emerald-400 flex items-center gap-1 font-mono">
-                        ⏱️ {sessionRemaining.includes('Ubegrenset') ? sessionRemaining : `${sessionRemaining} igjen`}
+                        ⏱️ {sessionRemaining.includes('Ubegrenset') || sessionRemaining.includes('∞') ? sessionRemaining : `${sessionRemaining} ${ex.leftSuffix}`}
                       </span>
                     </div>
 
@@ -891,12 +1664,12 @@ export const RemoteBingoModal: React.FC<RemoteBingoModalProps> = ({
                         }`}
                       >
                         {cloudSynced
-                          ? '☁️ Åpen overalt (Server + Google-sky aktiv)'
+                          ? ex.cloudOpenBadge
                           : serverSynced
-                          ? '🟢 Aktivert på server for mobil (Bingo & Quiz)'
+                          ? ex.serverOpenBadge
                           : regError
-                          ? `⚠️ ${regError}`
-                          : '⏳ Synkroniserer rom med server...'}
+                          ? `⚠️ ${localizeServerBingoMessage(regError, lang)}`
+                          : ex.syncingBadge}
                       </span>
                       <button
                         type="button"
@@ -904,13 +1677,13 @@ export const RemoteBingoModal: React.FC<RemoteBingoModalProps> = ({
                           sounds.playClick();
                           const active = remoteBingo.reactivateCurrentHostCode();
                           if (active) {
-                            setSuccessNotice(`🔄 Spillkode ${active} synkronisert og aktivert for alle deltakere på mobil!`);
+                            setSuccessNotice(ex.codeReactivatedNotice.replace('{code}', active));
                             setTimeout(() => setSuccessNotice(null), 2500);
                           }
                         }}
                         className="px-2.5 py-1 rounded-full bg-white/10 hover:bg-white/20 border border-white/20 text-[11px] font-bold text-amber-200 cursor-pointer"
                       >
-                        🔄 Aktiver på nytt
+                        {ex.reactivateBtn}
                       </button>
                     </div>
 
@@ -920,7 +1693,7 @@ export const RemoteBingoModal: React.FC<RemoteBingoModalProps> = ({
                         className="px-3.5 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-400/40 text-amber-200 text-xs font-bold cursor-pointer transition-all flex items-center gap-1.5"
                       >
                         <span>📋</span>
-                        <span>{copied ? 'Kopiert!' : 'Kopier kode'}</span>
+                        <span>{copied ? ui.copied : ui.copyCode}</span>
                       </button>
 
                       <button
@@ -928,17 +1701,16 @@ export const RemoteBingoModal: React.FC<RemoteBingoModalProps> = ({
                         className="px-3.5 py-1.5 rounded-xl bg-emerald-500/25 hover:bg-emerald-500/35 border border-emerald-400/50 text-emerald-100 text-xs font-bold cursor-pointer transition-all flex items-center gap-1.5"
                       >
                         <span>🔗</span>
-                        <span>{copiedLink ? '✓ Lenke kopiert!' : 'Deltakerlenke'}</span>
+                        <span>{copiedLink ? ui.copiedLink : ui.copyLink}</span>
                       </button>
 
                       <button
                         type="button"
                         onClick={handleCopyTvLink}
                         className="px-3.5 py-1.5 rounded-xl bg-purple-500/25 hover:bg-purple-500/35 border border-purple-400/50 text-purple-100 text-xs font-bold cursor-pointer transition-all flex items-center gap-1.5"
-                        title="Åpne denne lenken på TV eller prosjektor uten vertsknapper og med kode skjult til du deler den"
                       >
                         <span>📺</span>
-                        <span>{copiedTvLink ? '✓ TV-lenke kopiert!' : 'TV / Prosjektor-lenke'}</span>
+                        <span>{copiedTvLink ? ui.copiedLink : ui.tvLinkBtn}</span>
                       </button>
 
                       {onOpenTvMode && hostCode && (
@@ -952,34 +1724,35 @@ export const RemoteBingoModal: React.FC<RemoteBingoModalProps> = ({
                           className="px-3.5 py-1.5 rounded-xl bg-cyan-500/25 hover:bg-cyan-500/35 border border-cyan-400/50 text-cyan-100 text-xs font-bold cursor-pointer transition-all flex items-center gap-1.5"
                         >
                           <span>🖥️</span>
-                          <span>Ren TV-visning</span>
+                          <span>{ui.tvModeBtn}</span>
                         </button>
                       )}
 
                       {isCodeLocked ? (
                         <button
                           type="button"
-                          onClick={handleStartNewRoundCode}
+                          onClick={() => {
+                            sounds.playClick();
+                            setConfirmAction({ type: 'new_round' });
+                          }}
                           className="px-3.5 py-1.5 rounded-xl bg-black/50 hover:bg-black/70 border border-amber-500/40 text-amber-300 text-xs font-bold cursor-pointer transition-all flex items-center gap-1.5"
-                          title="Koden genereres kun 1 gang per runde av arrangøren. Start en ny runde for å generere ny kode."
                         >
                           <span>🔄</span>
-                          <span>Ny runde (1 ny kode)</span>
+                          <span>{ex.newRoundBtnFull}</span>
                         </button>
                       ) : (
                         <button
                           type="button"
                           onClick={handleRegenerateCode}
                           className="px-3.5 py-1.5 rounded-xl bg-black/40 hover:bg-black/60 border border-amber-500/30 text-amber-300 text-xs font-bold cursor-pointer transition-all flex items-center gap-1.5"
-                          title="Generer kode for denne runden (maks 1 per runde)"
                         >
                           <span>🎲</span>
-                          <span>Generer kode</span>
+                          <span>{ex.generateCodeBtn}</span>
                         </button>
                       )}
                     </div>
 
-                    {/* Storskjerm / TV Personvern-brytere */}
+                    {/* Screen Privacy Toggles */}
                     <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
                       <button
                         type="button"
@@ -993,9 +1766,7 @@ export const RemoteBingoModal: React.FC<RemoteBingoModalProps> = ({
                             : 'bg-black/60 border-white/20 text-slate-200 hover:border-amber-400'
                         }`}
                       >
-                        {showCodeOnBigScreen
-                          ? '📡 Deltakerkode ÅPEN på alle skjermer'
-                          : '🔒 Deltakerkode SKJULT på TV (Klikk for å åpne)'}
+                        {showCodeOnBigScreen ? ex.codeOpenAllScreens : ex.codeHiddenTvClickOpen}
                       </button>
                       <button
                         type="button"
@@ -1009,37 +1780,37 @@ export const RemoteBingoModal: React.FC<RemoteBingoModalProps> = ({
                             : 'bg-black/60 border-white/20 text-slate-200 hover:border-amber-400'
                         }`}
                       >
-                        {maskCodeOnHostScreen ? '🙈 Kode skjult på min skjerm' : '🙈 Skjul på min skjerm'}
+                        {maskCodeOnHostScreen ? ex.codeMaskedMine : ex.hideOnMyScreen}
                       </button>
                     </div>
 
                     <div className="text-[11px] font-bold text-amber-300/80">
-                      📡 Romkoden deles åpent på alle skjermer · Arrangørens private innloggingskode & fasit er alltid skjult
+                      {ex.codePrivacyLine}
                     </div>
 
                     <div className="p-2.5 rounded-xl bg-amber-950/40 border border-amber-500/20 text-xs text-amber-200/90 leading-relaxed text-left">
-                      💡 <strong>Del kode eller lenke (Kahoot-modus):</strong> Del koden <strong>{maskCodeOnHostScreen ? '••••' : hostCode}</strong> eller klikk <em>Deltakerlenke</em>. Bruk <em>TV / Prosjektor-lenke</em> på storskjermen så kode og fasit holdes skjult til du deler aktivt.
+                      {ex.shareTipPrefix} <strong>{maskCodeOnHostScreen ? '••••' : hostCode}</strong>
                     </div>
                   </div>
 
-                  {/* Live Organizer Notifications: Who joined & BINGO claims */}
+                  {/* Live Organizer Notifications */}
                   <div className="p-4 rounded-2xl bg-gradient-to-br from-emerald-950/35 via-black/45 to-amber-950/35 border border-emerald-400/40 space-y-2.5">
                     <div className="flex items-center justify-between gap-2 text-xs font-bold text-emerald-300 uppercase tracking-wider">
-                      <span>🔔 Varsler til arrangør — Hvem som ble med &amp; Bingorop ({hostNotifications.length})</span>
+                      <span>🔔 {ui.liveActivityTitle} ({hostNotifications.length})</span>
                       {unreadHostAlerts > 0 && (
                         <button
                           type="button"
                           onClick={() => remoteBingo.markHostNotificationsRead()}
                           className="px-2 py-0.5 rounded-lg bg-emerald-500/25 border border-emerald-400/50 text-[10px] font-black text-emerald-100 cursor-pointer"
                         >
-                          ✓ Marker lest
+                          ✓ {ui.markAllRead}
                         </button>
                       )}
                     </div>
 
                     {hostNotifications.length === 0 ? (
                       <div className="p-3 rounded-xl bg-black/35 border border-dashed border-emerald-400/25 text-xs text-slate-300/80 text-center">
-                        Ingen hendelser registrert ennå. Så snart en deltaker blir med med koden eller roper BINGO, dukker varselet opp her og som lyd/pop-up!
+                        {ui.noUnreadAlerts}
                       </div>
                     ) : (
                       <div className="space-y-1.5 max-h-44 overflow-y-auto pr-1">
@@ -1055,7 +1826,9 @@ export const RemoteBingoModal: React.FC<RemoteBingoModalProps> = ({
                             <div className="space-y-0.5 min-w-0">
                               <div className="flex items-center gap-1.5 flex-wrap">
                                 <span>{item.type === 'bingo' ? '🏆' : '👋'}</span>
-                                <span className="font-black">{item.detail}</span>
+                                <span className="font-black">
+                                  {localizeServerBingoMessage(item.detail, lang)}
+                                </span>
                               </div>
                               <div className="text-[10px] text-amber-200/70">
                                 {item.gameLabel} · {new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
@@ -1070,15 +1843,17 @@ export const RemoteBingoModal: React.FC<RemoteBingoModalProps> = ({
                   {/* Connected participants list */}
                   <div className="p-4 rounded-2xl bg-black/40 border border-amber-500/30 space-y-2">
                     <div className="flex items-center justify-between text-xs font-bold text-amber-300 uppercase tracking-wider">
-                      <span>Tilkoblede deltakere ({participants.length + musicParticipants.filter((mp) => !participants.some((rp) => rp.id === mp.id)).length}) · Runde {roundNumber}</span>
+                      <span>
+                        {ui.remoteParticipantsTitle} ({participants.length + musicParticipants.filter((mp) => !participants.some((rp) => rp.id === mp.id)).length}) · {ui.round} {roundNumber}
+                      </span>
                       <span className="text-[10px] text-emerald-400 flex items-center gap-1">
-                        Sanntid
+                        {ex.realtimeLabel}
                       </span>
                     </div>
 
                     {participants.length === 0 && musicParticipants.length === 0 ? (
                       <div className="p-4 rounded-xl bg-black/30 border border-dashed border-amber-500/20 text-center text-xs text-amber-300/60">
-                        Ingen mobildeltakere tilkoblet ennå. Del koden eller lenken over så dukker navnene opp her og på Storskjermen med en gang!
+                        {ui.remoteNoParticipants}
                       </div>
                     ) : (
                       <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
@@ -1099,11 +1874,13 @@ export const RemoteBingoModal: React.FC<RemoteBingoModalProps> = ({
                             </div>
 
                             <button
-                              onClick={() => handleKickParticipant(p)}
+                              onClick={() => {
+                                sounds.playClick();
+                                setConfirmAction({ type: 'kick', participant: p });
+                              }}
                               className="px-2 py-1 rounded-lg bg-rose-500/20 hover:bg-rose-500/40 text-rose-300 border border-rose-500/30 text-[11px] font-bold cursor-pointer transition-all"
-                              title="Fjern forstyrrende spiller (10 min utestengelse)"
                             >
-                              🚫 Kast ut (10 min)
+                              {ex.kickBtn}
                             </button>
                           </div>
                         ))}
@@ -1117,7 +1894,7 @@ export const RemoteBingoModal: React.FC<RemoteBingoModalProps> = ({
                               <div className="flex items-center gap-2">
                                 <span className="font-bold text-amber-100">{mp.name}</span>
                                 <span className="text-[10px] text-amber-300 font-semibold">
-                                  · Musikkbingo ({mp.markedCount} kryss · {mp.linesCompleted} rekker)
+                                  · {ui.musicTitle} ({mp.markedCount} {ex.marksSuffix} · {mp.linesCompleted} {ui.linesCountLabel})
                                 </span>
                               </div>
                             </div>
@@ -1126,12 +1903,12 @@ export const RemoteBingoModal: React.FC<RemoteBingoModalProps> = ({
                     )}
                   </div>
 
-                  {/* Banned participants management (10-minute auto-expiry or manual unban) */}
+                  {/* Banned participants management */}
                   {bannedList.length > 0 && (
                     <div className="p-4 rounded-2xl bg-rose-950/30 border border-rose-500/30 space-y-2">
                       <div className="flex items-center justify-between text-xs font-bold text-rose-300 uppercase tracking-wider">
-                        <span>🛡️ Midlertidig utestengte ({bannedList.length})</span>
-                        <span className="text-[10px] text-rose-200/70">10 min auto-opphør</span>
+                        <span>{ex.bannedHeader} ({bannedList.length})</span>
+                        <span className="text-[10px] text-rose-200/70">{ex.autoExpiryNote}</span>
                       </div>
 
                       <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1">
@@ -1146,15 +1923,17 @@ export const RemoteBingoModal: React.FC<RemoteBingoModalProps> = ({
                               <div>
                                 <span className="font-bold text-rose-200">{b.name}</span>
                                 <span className="text-[10px] text-rose-300/60 block">
-                                  {remainingMs > 0 ? `Utestengt i ${remainingMins} min til` : 'Utløpt'} • {b.reason}
+                                  {remainingMs > 0
+                                    ? `${ex.banRemainingPrefix} ${remainingMins} ${ex.banMinutesSuffix}`
+                                    : ex.expiredBadge}{' '}
+                                  • {b.reason}
                                 </span>
                               </div>
                               <button
                                 onClick={() => handleUnban(b)}
                                 className="px-2.5 py-1 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/40 text-emerald-200 border border-emerald-500/30 text-[11px] font-bold cursor-pointer transition-all"
-                                title="Opphev utestengelse nå"
                               >
-                                ✓ Opphev
+                                {ex.unbanBtn}
                               </button>
                             </div>
                           );
@@ -1173,7 +1952,7 @@ export const RemoteBingoModal: React.FC<RemoteBingoModalProps> = ({
               <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-xs text-amber-200 leading-relaxed flex items-center gap-2">
                 <span className="text-xl">💬</span>
                 <div>
-                  <strong>Direktemeldinger med arrangør:</strong> Spillere kan sende spørsmål eller hilse til bingoverten. Verten ser alle meldinger og kan svare direkte.
+                  <strong>{ex.msgIntroTitle}</strong> {ex.msgIntroBody}
                 </div>
               </div>
 
@@ -1181,8 +1960,8 @@ export const RemoteBingoModal: React.FC<RemoteBingoModalProps> = ({
               <div className="p-3 rounded-2xl bg-black/40 border border-amber-500/30 h-64 overflow-y-auto space-y-2">
                 {messages.length === 0 ? (
                   <div className="h-full flex flex-col items-center justify-center text-center text-xs text-amber-300/50 p-4">
-                    <span>Ingen meldinger ennå.</span>
-                    <span className="text-[11px] mt-1">Send et spørsmål, hilsen eller be om en allsang til bingoverten!</span>
+                    <span>{ex.msgEmptyTitle}</span>
+                    <span className="text-[11px] mt-1">{ex.msgEmptyHint}</span>
                   </div>
                 ) : (
                   messages.map((m) => (
@@ -1214,11 +1993,7 @@ export const RemoteBingoModal: React.FC<RemoteBingoModalProps> = ({
                 <input
                   type="text"
                   maxLength={160}
-                  placeholder={
-                    !isRemote
-                      ? 'Svar som bingovert til rommet...'
-                      : 'Skriv en melding eller hilsen til bingoverten...'
-                  }
+                  placeholder={!isRemote ? ex.msgHostPlaceholder : ex.msgPlayerPlaceholder}
                   value={msgInput}
                   onChange={(e) => setMsgInput(e.target.value)}
                   className="flex-1 px-3 py-2.5 rounded-xl bg-black/60 border border-amber-400/40 text-amber-100 placeholder-amber-400/30 text-xs outline-none focus:border-amber-400"
@@ -1228,7 +2003,7 @@ export const RemoteBingoModal: React.FC<RemoteBingoModalProps> = ({
                   disabled={!msgInput.trim()}
                   className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-amber-400 text-black font-black text-xs hover:brightness-110 active:scale-95 disabled:opacity-40 cursor-pointer flex items-center gap-1.5 shadow"
                 >
-                  <span>Send</span>
+                  <span>{ex.sendBtn}</span>
                   <span>➔</span>
                 </button>
               </form>
@@ -1238,15 +2013,15 @@ export const RemoteBingoModal: React.FC<RemoteBingoModalProps> = ({
 
         {/* Footer info */}
         <div className="pt-3 mt-3 border-t border-amber-500/20 text-center text-[11px] text-amber-300/60 flex items-center justify-between">
-          <span>JoyBingo Avstandsbingo • Sanntidssynkronisering</span>
+          <span>{ex.footerBrand}</span>
           <span className="text-amber-400 font-mono">
             {hasPaid && hostCode
               ? maskCodeOnHostScreen
-                ? 'Kode: ••••'
-                : `Kode: ${hostCode}`
+                ? `${ui.code}: ••••`
+                : `${ui.code}: ${hostCode}`
               : currentRoom
-              ? `Rom: ${currentRoom}`
-              : 'Kode genereres etter betaling'}
+              ? `${ui.code}: ${currentRoom}`
+              : ex.codeAfterPay}
           </span>
         </div>
       </div>

@@ -9,8 +9,23 @@ import { BingoMilestone } from '../types/bingo';
 import { MUSIC_BINGO_SONGS, MusicBingoSong } from '../data/musicBingoSongs';
 
 export interface MusicBingoClaimInfo {
+  claimId?: string;
   playerName: string;
   pattern: string;
+  milestone?: BingoMilestone;
+  isFullHouse?: boolean;
+  roundNumber?: number;
+  claimedMilestones?: BingoMilestone[];
+  milestoneWinners?: Partial<Record<BingoMilestone, string>>;
+  autoNewRoundDelayMs?: number;
+  timestamp: number;
+}
+
+export interface MusicBingoNewRoundEvent {
+  roomCode: string;
+  roundNumber: number;
+  winnerName?: string;
+  reason: 'fullbrett' | 'host';
   timestamp: number;
 }
 
@@ -61,9 +76,12 @@ class MusicBingoService {
   private listeners: Set<() => void> = new Set();
   private rejectListeners: Set<(message: string) => void> = new Set();
   private claimListeners: Set<(claim: MusicBingoClaimInfo & { milestone?: BingoMilestone }) => void> = new Set();
+  private newRoundListeners: Set<(ev: MusicBingoNewRoundEvent) => void> = new Set();
   private seenParticipantIds: Set<string> = new Set();
+  private seenClaimIds: Set<string> = new Set();
   private lastRecordedClaimTs: number = 0;
   private clockOffsetMs = 0;
+  private statePollTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor() {
     if (typeof window !== 'undefined') {
@@ -90,27 +108,20 @@ class MusicBingoService {
 
       socialSocket.on('music:bingo_claimed', (payload: unknown) => {
         if (payload && typeof payload === 'object') {
-          const data = payload as {
-            playerName?: string;
-            pattern?: string;
-            milestone?: BingoMilestone;
-            timestamp?: number;
-          };
-          if (data.playerName && data.pattern) {
-            const ts = data.timestamp || Date.now();
-            if (ts !== this.lastRecordedClaimTs) {
-              this.lastRecordedClaimTs = ts;
-              remoteBingo.recordMusicBingoClaim(data.playerName, data.pattern);
-            }
-            this.claimListeners.forEach((fn) =>
-              fn({
-                playerName: data.playerName!,
-                pattern: data.pattern!,
-                milestone: data.milestone,
-                timestamp: ts,
-              })
-            );
-          }
+          this.handleIncomingClaimPayload(payload as Partial<MusicBingoClaimInfo>);
+        }
+      });
+
+      socialSocket.on('music:new_round', (payload: unknown) => {
+        if (payload && typeof payload === 'object') {
+          const data = payload as Partial<MusicBingoNewRoundEvent>;
+          this.handleIncomingNewRound({
+            roomCode: String(data.roomCode || this.snapshot.roomCode || ''),
+            roundNumber: Number(data.roundNumber) || (this.snapshot.roundNumber || 1) + 1,
+            winnerName: data.winnerName ? String(data.winnerName) : undefined,
+            reason: data.reason === 'host' ? 'host' : 'fullbrett',
+            timestamp: Number(data.timestamp) || Date.now(),
+          });
         }
       });
 
@@ -145,16 +156,99 @@ class MusicBingoService {
           const code = remoteBingo.getCurrentRoomCode();
           if (code) {
             socialSocket.send('music:request_state', { roomCode: code });
+            this.startStatePolling(code);
           }
         }
       });
     }
   }
 
+  private handleIncomingClaimPayload(raw: Partial<MusicBingoClaimInfo>) {
+    if (!raw.playerName || !raw.pattern) return;
+    const claimId = raw.claimId ? String(raw.claimId) : '';
+    if (claimId) {
+      if (this.seenClaimIds.has(claimId)) return;
+      this.seenClaimIds.add(claimId);
+      if (this.seenClaimIds.size > 200) {
+        const first = this.seenClaimIds.values().next().value;
+        if (first) this.seenClaimIds.delete(first);
+      }
+    }
+    const ts = Number(raw.timestamp) || Date.now();
+    const isFullHouse = Boolean(raw.isFullHouse) || raw.milestone === 'fullbrett';
+    const nextClaimed = Array.isArray(raw.claimedMilestones)
+      ? raw.claimedMilestones
+      : raw.milestone
+      ? Array.from(new Set([...this.snapshot.claimedMilestones, raw.milestone]))
+      : this.snapshot.claimedMilestones;
+    const nextWinners =
+      raw.milestoneWinners && typeof raw.milestoneWinners === 'object'
+        ? raw.milestoneWinners
+        : raw.milestone
+        ? { ...this.snapshot.milestoneWinners, [raw.milestone]: raw.playerName }
+        : this.snapshot.milestoneWinners;
+
+    const normalizedClaim: MusicBingoClaimInfo = {
+      claimId: claimId || undefined,
+      playerName: raw.playerName,
+      pattern: raw.pattern,
+      milestone: raw.milestone,
+      isFullHouse,
+      roundNumber: raw.roundNumber || this.snapshot.roundNumber,
+      claimedMilestones: nextClaimed,
+      milestoneWinners: nextWinners,
+      autoNewRoundDelayMs: raw.autoNewRoundDelayMs ?? (isFullHouse ? 4500 : 0),
+      timestamp: ts,
+    };
+
+    if (ts !== this.lastRecordedClaimTs) {
+      this.lastRecordedClaimTs = ts;
+      remoteBingo.recordMusicBingoClaim(normalizedClaim.playerName, normalizedClaim.pattern);
+    }
+
+    this.snapshot = {
+      ...this.snapshot,
+      lastClaim: normalizedClaim,
+      claimedMilestones: nextClaimed,
+      milestoneWinners: nextWinners,
+    };
+    this.notify();
+    this.claimListeners.forEach((fn) => fn(normalizedClaim));
+  }
+
+  private handleIncomingNewRound(ev: MusicBingoNewRoundEvent) {
+    if (ev.roundNumber <= this.snapshot.roundNumber && this.snapshot.playedSongIds.length === 0 && this.snapshot.claimedMilestones.length === 0) {
+      return;
+    }
+    this.snapshot = {
+      ...this.snapshot,
+      roomCode: ev.roomCode || this.snapshot.roomCode,
+      roundNumber: ev.roundNumber,
+      playedSongIds: [],
+      currentSongId: null,
+      revealCurrentSong: false,
+      clipStartedAt: 0,
+      lastClaim: null,
+      claimedMilestones: [],
+      milestoneWinners: {},
+      participants: this.snapshot.participants.map((p) => ({
+        ...p,
+        markedCount: 0,
+        linesCompleted: 0,
+        hasBingo: false,
+      })),
+    };
+    this.notify();
+    this.newRoundListeners.forEach((fn) => fn(ev));
+  }
+
   private applyServerState(incoming: Partial<MusicBingoSnapshot>) {
     if (typeof incoming.serverNow === 'number' && incoming.serverNow > 0) {
       this.clockOffsetMs = incoming.serverNow - Date.now();
     }
+    const prevRound = this.snapshot.roundNumber || 1;
+    const incomingRound = typeof incoming.roundNumber === 'number' ? incoming.roundNumber : prevRound;
+
     if (Array.isArray(incoming.participants)) {
       incoming.participants.forEach((p) => {
         if (p?.id && !this.seenParticipantIds.has(p.id)) {
@@ -163,10 +257,12 @@ class MusicBingoService {
         }
       });
     }
-    if (incoming.lastClaim && incoming.lastClaim.timestamp && incoming.lastClaim.timestamp !== this.lastRecordedClaimTs) {
-      this.lastRecordedClaimTs = incoming.lastClaim.timestamp;
-      remoteBingo.recordMusicBingoClaim(incoming.lastClaim.playerName, incoming.lastClaim.pattern);
+
+    const roomCode = incoming.roomCode || this.snapshot.roomCode;
+    if (roomCode) {
+      this.startStatePolling(roomCode);
     }
+
     this.snapshot = {
       ...this.snapshot,
       ...incoming,
@@ -185,6 +281,49 @@ class MusicBingoService {
         : this.snapshot.participants,
     };
     this.notify();
+
+    if (incomingRound > prevRound) {
+      this.newRoundListeners.forEach((fn) =>
+        fn({
+          roomCode: roomCode || '',
+          roundNumber: incomingRound,
+          reason: 'fullbrett',
+          timestamp: Date.now(),
+        })
+      );
+    }
+
+    if (incoming.lastClaim && incoming.lastClaim.timestamp && incoming.lastClaim.timestamp !== this.lastRecordedClaimTs) {
+      this.handleIncomingClaimPayload(incoming.lastClaim);
+    }
+  }
+
+  private startStatePolling(roomCode: string) {
+    if (typeof window === 'undefined') return;
+    const clean = this.resolveRoomCode(roomCode);
+    if (!clean || this.statePollTimer) return;
+    this.statePollTimer = setInterval(() => {
+      const activeCode = this.resolveRoomCode();
+      if (!activeCode) {
+        this.stopStatePolling();
+        return;
+      }
+      fetch(`/api/rooms/state?code=${encodeURIComponent(activeCode)}`, { cache: 'no-store' })
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data) => {
+          if (data?.musicSnapshot && typeof data.musicSnapshot === 'object') {
+            this.applyServerState(data.musicSnapshot as Partial<MusicBingoSnapshot>);
+          }
+        })
+        .catch(() => {});
+    }, 2500);
+  }
+
+  public stopStatePolling() {
+    if (this.statePollTimer) {
+      clearInterval(this.statePollTimer);
+      this.statePollTimer = null;
+    }
   }
 
   public getSnapshot(): MusicBingoSnapshot {
@@ -240,6 +379,7 @@ class MusicBingoService {
       clipDurationSec: this.snapshot.clipDurationSec,
       lastClaim: this.snapshot.lastClaim,
     });
+    this.startStatePolling(code);
     this.notify();
   }
 
@@ -312,33 +452,32 @@ class MusicBingoService {
     this.pushHostState();
   }
 
-  public startNewRound() {
+  public startNewRound(winnerName?: string) {
     if (!remoteBingo.canActAsHost()) return;
     const nextRound = (this.snapshot.roundNumber || 1) + 1;
-    this.snapshot = {
-      ...this.snapshot,
-      roundNumber: nextRound,
-      playedSongIds: [],
-      currentSongId: null,
-      revealCurrentSong: false,
-      clipStartedAt: 0,
-      lastClaim: null,
-      claimedMilestones: [],
-      milestoneWinners: {},
-      participants: this.snapshot.participants.map((p) => ({
-        ...p,
-        markedCount: 0,
-        linesCompleted: 0,
-        hasBingo: false,
-      })),
-    };
     const code = this.resolveRoomCode();
+    const hostKey = remoteBingo.getHostKeyForService();
+    this.handleIncomingNewRound({
+      roomCode: code,
+      roundNumber: nextRound,
+      winnerName,
+      reason: 'host',
+      timestamp: Date.now(),
+    });
     if (code) {
       socialSocket.send('music:new_round', {
         roomCode: code,
-        hostKey: remoteBingo.getHostKeyForService(),
+        hostKey,
         roundNumber: nextRound,
+        winnerName,
       });
+      if (typeof window !== 'undefined') {
+        fetch('/api/rooms/music/new_round', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ roomCode: code, hostKey, winnerName }),
+        }).catch(() => {});
+      }
     }
     this.pushHostState();
   }
@@ -356,6 +495,17 @@ class MusicBingoService {
     const code = this.resolveRoomCode(roomCode);
     if (!code) return;
     socialSocket.send('music:request_state', { roomCode: code });
+    this.startStatePolling(code);
+    if (typeof window !== 'undefined') {
+      fetch(`/api/rooms/state?code=${encodeURIComponent(code)}`, { cache: 'no-store' })
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data) => {
+          if (data?.musicSnapshot && typeof data.musicSnapshot === 'object') {
+            this.applyServerState(data.musicSnapshot as Partial<MusicBingoSnapshot>);
+          }
+        })
+        .catch(() => {});
+    }
   }
 
   public reportDigitalProgress(
@@ -385,13 +535,54 @@ class MusicBingoService {
   ) {
     const code = this.resolveRoomCode(roomCode);
     if (!code) return;
+    const claimId = `mcl-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
     socialSocket.send('music:claim_bingo', {
       roomCode: code,
       playerName,
       pattern,
       linesCompleted,
       hasFullHouse,
+      claimId,
     });
+
+    if (typeof window !== 'undefined') {
+      fetch('/api/rooms/music/claim', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          roomCode: code,
+          senderId: socialSocket.getProfile().id || 'http-client',
+          playerName,
+          pattern,
+          linesCompleted,
+          hasFullHouse,
+          claimId,
+        }),
+      })
+        .then(async (res) => {
+          const data = await res.json().catch(() => null);
+          if (!res.ok && data) {
+            this.snapshot = {
+              ...this.snapshot,
+              claimedMilestones: Array.isArray(data.claimedMilestones)
+                ? data.claimedMilestones
+                : this.snapshot.claimedMilestones,
+              milestoneWinners:
+                data.milestoneWinners && typeof data.milestoneWinners === 'object'
+                  ? data.milestoneWinners
+                  : this.snapshot.milestoneWinners,
+            };
+            this.notify();
+            if (data.message) {
+              this.rejectListeners.forEach((fn) => fn(String(data.message)));
+            }
+          } else if (res.ok && data?.claim) {
+            this.handleIncomingClaimPayload(data.claim as Partial<MusicBingoClaimInfo>);
+          }
+        })
+        .catch(() => {});
+    }
   }
 
   /**
@@ -433,6 +624,11 @@ class MusicBingoService {
   public onClaim(fn: (claim: MusicBingoClaimInfo & { milestone?: BingoMilestone }) => void): () => void {
     this.claimListeners.add(fn);
     return () => this.claimListeners.delete(fn);
+  }
+
+  public onNewRound(fn: (ev: MusicBingoNewRoundEvent) => void): () => void {
+    this.newRoundListeners.add(fn);
+    return () => this.newRoundListeners.delete(fn);
   }
 
   public subscribe(fn: () => void): () => void {

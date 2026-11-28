@@ -6,9 +6,17 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { sounds } from '../audio/soundEngine';
 import { RemoteBingoClaim } from '../services/remoteBingo';
+import { useTranslation } from '../services/i18n';
+import {
+  formatMilestoneLabel,
+  getBingoUiTexts,
+  localizeBingoPattern,
+} from '../services/bingoUiI18n';
+import { WinnerTask } from '../data/winnerTasks';
 
 interface RemoteBingoClaimModalProps {
   claim: RemoteBingoClaim | null;
+  winnerTask?: WinnerTask | null;
   onClose: () => void;
   isHost?: boolean;
   onStartNewRoundNow?: () => void;
@@ -16,19 +24,22 @@ interface RemoteBingoClaimModalProps {
 
 export const RemoteBingoClaimModal: React.FC<RemoteBingoClaimModalProps> = ({
   claim,
+  winnerTask,
   onClose,
   isHost = false,
   onStartNewRoundNow,
 }) => {
+  const { lang } = useTranslation();
+  const ui = getBingoUiTexts(lang);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const [countdownSec, setCountdownSec] = useState<number>(4);
+  const [countdownSec, setCountdownSec] = useState<number>(5);
 
   useEffect(() => {
     if (!claim) return;
     sounds.playBingoWin();
 
     if (claim.isFullHouse) {
-      const initialSec = Math.max(1, Math.ceil((claim.autoNewRoundDelayMs || 4500) / 1000));
+      const initialSec = Math.max(1, Math.ceil((claim.autoNewRoundDelayMs || 5500) / 1000));
       setCountdownSec(initialSec);
       const timer = window.setInterval(() => {
         setCountdownSec((prev) => (prev > 1 ? prev - 1 : 1));
@@ -112,29 +123,25 @@ export const RemoteBingoClaimModal: React.FC<RemoteBingoClaimModalProps> = ({
 
   if (!claim) return null;
 
-  const resolvedTier =
+  const resolvedTier: 'line1' | 'line3' | 'fullbrett' =
     claim.milestone ||
-    (claim.isFullHouse || /fullbrett|fullt?\s*brett/i.test(claim.pattern)
+    (claim.isFullHouse || /fullbrett|fullt?\s*brett|full_?house|blackout/i.test(claim.pattern)
       ? 'fullbrett'
-      : /3\s*\.?\s*rekke/i.test(claim.pattern)
+      : /3\s*\.?\s*rekke|3\s*line/i.test(claim.pattern)
       ? 'line3'
       : 'line1');
-  const tierLabel =
-    resolvedTier === 'fullbrett'
-      ? 'Fullt brett'
-      : resolvedTier === 'line3'
-      ? '3. rekker'
-      : '1. rekke';
+  const tierLabel = formatMilestoneLabel(resolvedTier, lang);
+  const localizedPattern = localizeBingoPattern(claim.pattern, lang);
   const nextLevelLabel =
     resolvedTier === 'line1'
-      ? '3. rekker'
+      ? ui.milestoneLine3
       : resolvedTier === 'line3'
-      ? 'Full brett'
-      : 'Ny runde';
+      ? ui.milestoneFullbrett
+      : ui.newRoundBtn;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/90 backdrop-blur-md animate-fadeIn">
-      <div className="relative w-full max-w-md bg-gradient-to-b from-[#2e1708] via-[#1c0d05] to-[#0a0603] border-4 border-amber-400 rounded-3xl p-6 sm:p-8 text-center shadow-2xl text-amber-50 overflow-hidden">
+    <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/90 backdrop-blur-md animate-fadeIn">
+      <div className="relative w-full max-w-md bg-gradient-to-b from-[#2e1708] via-[#1c0d05] to-[#0a0603] border-4 border-amber-400 rounded-3xl p-6 sm:p-8 text-center shadow-2xl text-amber-50 overflow-hidden max-h-[92vh] overflow-y-auto">
         
         {/* Confetti canvas overlay */}
         <canvas
@@ -152,42 +159,63 @@ export const RemoteBingoClaimModal: React.FC<RemoteBingoClaimModalProps> = ({
 
           <div>
             <span className="px-3 py-1 rounded-full bg-emerald-500/25 text-emerald-200 border border-emerald-400/50 text-xs font-mono font-bold uppercase tracking-widest inline-block mb-2">
-              {claim.isFullHouse ? '✓ Bekreftet Fullbrett · Ny runde følger' : `✓ Bekreftet ${tierLabel} · Neste: ${nextLevelLabel}`}
+              ✓ {ui.claimModalBadge} · {tierLabel}
             </span>
-            <h2 className="font-heading font-black text-3xl sm:text-4xl text-amber-200 tracking-wide">
-              {claim.isFullHouse ? 'FULLBRETT BINGO!' : `${tierLabel.toUpperCase()} BINGO!`}
+            <h2 className="font-heading font-black text-2xl sm:text-3xl text-amber-200 tracking-wide">
+              {claim.isFullHouse ? ui.claimModalTitleFull : `${tierLabel.toUpperCase()} — ${ui.claimModalTitleLine}`}
             </h2>
           </div>
 
           <div className="p-4 rounded-2xl bg-black/60 border border-amber-500/40 space-y-2">
-            <div className="text-sm text-amber-300 font-bold">
-              Deltaker som har fylt {tierLabel.toLowerCase()} og trykket BINGO:
+            <div className="text-xs sm:text-sm text-amber-300 font-bold">
+              {ui.shoutedBannerMid} {tierLabel} {ui.shoutedBannerSuffix}
             </div>
             <div className="font-heading font-black text-2xl sm:text-3xl text-amber-100 tracking-wide">
               {claim.playerName}
             </div>
-            <div className="text-xs text-emerald-400 font-mono font-bold flex items-center justify-center gap-1.5 pt-1">
-              <span>🎯 Bekreftet mønster:</span>
+            <div className="text-xs text-emerald-400 font-mono font-bold flex flex-wrap items-center justify-center gap-1.5 pt-1">
+              <span>🎯 {ui.claimModalPatternLabel}</span>
               <span className="bg-emerald-500/20 px-2 py-0.5 rounded-md border border-emerald-500/30">
-                {claim.pattern}
+                {localizedPattern}
               </span>
+              {typeof claim.cardIndex === 'number' && claim.cardIndex >= 0 && (
+                <span className="bg-amber-500/15 px-2 py-0.5 rounded-md border border-amber-500/30 text-amber-200">
+                  {ui.claimModalCardPrefix}{claim.cardIndex + 1}
+                </span>
+              )}
+              {typeof claim.roundNumber === 'number' && (
+                <span className="bg-cyan-500/15 px-2 py-0.5 rounded-md border border-cyan-500/30 text-cyan-200">
+                  {ui.claimModalRoundPrefix} #{claim.roundNumber}
+                </span>
+              )}
             </div>
           </div>
+
+          {winnerTask && (
+            <div className="p-3.5 rounded-2xl bg-gradient-to-br from-amber-950/75 via-black/60 to-rose-950/60 border border-amber-400/60 text-center space-y-1.5 shadow-lg">
+              <div className="text-[11px] font-black uppercase tracking-wider text-rose-300 flex items-center justify-center gap-1.5">
+                <span>{winnerTask.icon}</span>
+                <span>{ui.claimModalTaskBadge}</span>
+                <span>💖</span>
+              </div>
+              <div className="font-heading font-bold text-sm sm:text-base text-amber-100 leading-snug">
+                «{winnerTask.task}»
+              </div>
+              <div className="text-[11px] text-amber-300/80 font-mono">
+                +{winnerTask.sparkReward} {ui.winnerTaskRewardLabel}
+              </div>
+            </div>
+          )}
 
           {claim.isFullHouse ? (
             <div className="p-3 rounded-2xl bg-emerald-500/20 border border-emerald-400/50 text-emerald-100 text-xs font-black flex items-center justify-center gap-2">
               <span className="animate-spin">🔄</span>
-              <span>Ny runde starter automatisk om {countdownSec}s...</span>
+              <span>{ui.claimModalNewRoundNote} ({countdownSec}s)</span>
             </div>
           ) : (
             <div className="p-3.5 rounded-2xl bg-cyan-950/60 border border-cyan-400/50 text-cyan-100 text-xs sm:text-sm font-bold leading-relaxed space-y-1">
               <div className="text-amber-200 font-black">
-                ➡️ Spillet fortsetter nå til {nextLevelLabel}!
-              </div>
-              <div className="text-[11px] text-cyan-200/90">
-                {resolvedTier === 'line1'
-                  ? '1. rekke er nå fullført og låst for alle. Rop BINGO åpnes igjen når du fyller 3. rekker!'
-                  : '1. og 3. rekker er nå fullført og låst for alle. Rop BINGO åpnes igjen ved fullt brett!'}
+                {resolvedTier === 'line1' ? ui.claimModalContinuesLine3 : ui.claimModalContinuesFull}
               </div>
             </div>
           )}
@@ -203,7 +231,7 @@ export const RemoteBingoClaimModal: React.FC<RemoteBingoClaimModalProps> = ({
                   }}
                   className="flex-1 py-3 px-4 rounded-xl bg-gradient-to-r from-emerald-400 to-teal-400 hover:brightness-110 text-slate-950 font-black text-sm cursor-pointer shadow-lg transition-all"
                 >
-                  🔄 Start ny runde nå
+                  {ui.claimModalStartNewRoundNow}
                 </button>
               ) : (
                 <button
@@ -213,7 +241,7 @@ export const RemoteBingoClaimModal: React.FC<RemoteBingoClaimModalProps> = ({
                   }}
                   className="flex-1 py-3 px-4 rounded-xl bg-gradient-to-r from-amber-500 to-amber-400 hover:from-amber-400 hover:to-amber-300 text-black font-black text-sm cursor-pointer shadow-lg transition-all"
                 >
-                  🎉 Gratulerer vinneren!
+                  {ui.claimModalAcknowledgeBtn}
                 </button>
               )
             ) : (
@@ -225,7 +253,7 @@ export const RemoteBingoClaimModal: React.FC<RemoteBingoClaimModalProps> = ({
                   }}
                   className="flex-1 py-3 px-4 rounded-xl bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 text-slate-950 font-black text-sm cursor-pointer shadow-lg transition-all"
                 >
-                  ➡️ Fortsett til {nextLevelLabel}
+                  ➡️ {nextLevelLabel}
                 </button>
                 {isHost && onStartNewRoundNow && (
                   <button
@@ -235,9 +263,9 @@ export const RemoteBingoClaimModal: React.FC<RemoteBingoClaimModalProps> = ({
                       onClose();
                     }}
                     className="py-3 px-3.5 rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 text-amber-100 text-xs font-bold cursor-pointer transition-all"
-                    title="Start en helt ny runde i stedet for å fortsette"
+                    title={ui.newRoundBtn}
                   >
-                    🔄 Ny runde
+                    🔄 {ui.newRoundBtn}
                   </button>
                 )}
               </>
@@ -250,7 +278,7 @@ export const RemoteBingoClaimModal: React.FC<RemoteBingoClaimModalProps> = ({
               }}
               className="py-3 px-4 rounded-xl bg-black/40 hover:bg-black/60 border border-amber-500/30 text-amber-200 text-xs font-bold cursor-pointer transition-all"
             >
-              Lukk
+              {ui.claimModalCloseBtn}
             </button>
           </div>
         </div>

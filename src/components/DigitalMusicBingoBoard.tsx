@@ -11,6 +11,13 @@ import {
   generateMusicBingoCard,
 } from '../data/musicBingoSongs';
 import { MusicBingoSnapshot, musicBingoService } from '../services/musicBingoService';
+import { useTranslation } from '../services/i18n';
+import {
+  formatMilestoneLabel,
+  getBingoUiTexts,
+  localizeBingoPattern,
+  localizeServerBingoMessage,
+} from '../services/bingoUiI18n';
 
 interface DigitalMusicBingoBoardProps {
   roomCode: string;
@@ -23,6 +30,9 @@ export const DigitalMusicBingoBoard: React.FC<DigitalMusicBingoBoardProps> = ({
   playerName,
   onClaimedBingo,
 }) => {
+  const { lang } = useTranslation();
+  const ui = getBingoUiTexts(lang);
+
   const [snap, setSnap] = useState<MusicBingoSnapshot>(() => musicBingoService.getSnapshot());
   const [cardSeed, setCardSeed] = useState<number>(() => Math.floor(100 + Math.random() * 900));
   const [markedIds, setMarkedIds] = useState<Set<string>>(() => new Set());
@@ -30,6 +40,7 @@ export const DigitalMusicBingoBoard: React.FC<DigitalMusicBingoBoardProps> = ({
   const [lightPaperMode, setLightPaperMode] = useState<boolean>(true);
   const [claimSent, setClaimSent] = useState<string | null>(null);
   const [claimError, setClaimError] = useState<string | null>(null);
+  const [newRoundBanner, setNewRoundBanner] = useState<string | null>(null);
   const [dismissedClaimTs, setDismissedClaimTs] = useState<number>(0);
 
   useEffect(() => {
@@ -40,19 +51,31 @@ export const DigitalMusicBingoBoard: React.FC<DigitalMusicBingoBoardProps> = ({
     const unsubReject = musicBingoService.onClaimRejected((msg) => {
       sounds.playClick();
       setClaimSent(null);
-      setClaimError(msg);
+      setClaimError(localizeServerBingoMessage(msg, lang));
     });
     const unsubClaim = musicBingoService.onClaim(() => {
       sounds.playLineComplete();
+    });
+    const unsubNewRound = musicBingoService.onNewRound((ev) => {
+      sounds.playLineComplete();
+      setMarkedIds(new Set());
+      setClaimSent(null);
+      setClaimError(null);
+      setCardSeed(Math.floor(100 + Math.random() * 900));
+      setNewRoundBanner(
+        ui.musicNewRoundNotice.replace('{n}', String(ev.roundNumber))
+      );
+      window.setTimeout(() => setNewRoundBanner(null), 6000);
     });
     return () => {
       unsub();
       unsubReject();
       unsubClaim();
+      unsubNewRound();
     };
-  }, [roomCode]);
+  }, [roomCode, lang, ui.musicNewRoundNotice]);
 
-  // Nullstill avkryssing automatisk hvis arrangøren starter en ny runde
+  // Reset board automatically when roundNumber changes via polling or WS
   useEffect(() => {
     setMarkedIds(new Set());
     setClaimSent(null);
@@ -86,25 +109,25 @@ export const DigitalMusicBingoBoard: React.FC<DigitalMusicBingoBoardProps> = ({
       return {
         tier: 'fullbrett' as const,
         pattern: 'FULLT BRETT · MUSIKKBINGO',
-        label: '🏆 ROP MUSIKKBINGO! (Fullt brett)',
+        label: `${ui.musicShoutBtnPrefix} ${ui.milestoneFullbrett}`,
       };
     }
     if (evalResult.linesCompleted >= 3 && !claimedMilestones.includes('line3')) {
       return {
         tier: 'line3' as const,
         pattern: '3. REKKER · MUSIKKBINGO',
-        label: '🎉 ROP MUSIKKBINGO! (3. rekker)',
+        label: `${ui.musicShoutBtnPrefix} ${ui.milestoneLine3}`,
       };
     }
     if (evalResult.linesCompleted >= 1 && !claimedMilestones.includes('line1')) {
       return {
         tier: 'line1' as const,
         pattern: '1. REKKE · MUSIKKBINGO',
-        label: '🎉 ROP MUSIKKBINGO! (1. rekke)',
+        label: `${ui.musicShoutBtnPrefix} ${ui.milestoneLine1}`,
       };
     }
     return null;
-  }, [evalResult.hasFullHouse, evalResult.linesCompleted, claimedMilestones]);
+  }, [evalResult.hasFullHouse, evalResult.linesCompleted, claimedMilestones, ui]);
 
   const handleToggleSong = (songId: string) => {
     sounds.playPop(1.08);
@@ -123,12 +146,10 @@ export const DigitalMusicBingoBoard: React.FC<DigitalMusicBingoBoardProps> = ({
   const handleClaim = () => {
     if (!eligibleMusicClaim) {
       sounds.playClick();
-      if (claimedMilestones.includes('line3')) {
-        setClaimError('🔒 1. og 3. rekke er allerede ropt! Du må fullføre fullt brett før du kan rope BINGO.');
-      } else if (claimedMilestones.includes('line1')) {
-        setClaimError('🔒 1. rekke er allerede ropt! Du må fullføre 3. rekker eller fullt brett før du kan rope BINGO.');
+      if (claimedMilestones.includes('fullbrett')) {
+        setClaimError(`🔒 ${ui.musicAllClaimedHint}`);
       } else {
-        setClaimError('🔒 Du må krysse av minst 1 hel rekke først før du kan rope BINGO.');
+        setClaimError(`🔒 ${ui.musicNeedLineHint}`);
       }
       return;
     }
@@ -136,18 +157,18 @@ export const DigitalMusicBingoBoard: React.FC<DigitalMusicBingoBoardProps> = ({
     sounds.playBingoWin();
     musicBingoService.claimDigitalBingo(
       roomCode,
-      playerName || 'Deltaker',
+      playerName || ui.guest,
       eligibleMusicClaim.pattern,
       evalResult.linesCompleted,
       evalResult.hasFullHouse
     );
     const nextHint =
       eligibleMusicClaim.tier === 'line1'
-        ? 'Spillet fortsetter til 3. rekker!'
+        ? ui.continuesToLine3
         : eligibleMusicClaim.tier === 'line3'
-        ? 'Spillet fortsetter til Fullt brett!'
-        : 'Fullt brett oppnådd!';
-    setClaimSent(`🎉 Bingo sendt til arrangør og alle deltakere (${eligibleMusicClaim.pattern})! ➡️ ${nextHint}`);
+        ? ui.continuesToFullbrett
+        : ui.newRoundStartsSoon;
+    setClaimSent(`🎉 ${ui.claimModalBadge} (${formatMilestoneLabel(eligibleMusicClaim.tier, lang)}) · ${nextHint}`);
     if (onClaimedBingo) onClaimedBingo(eligibleMusicClaim.pattern);
   };
 
@@ -157,14 +178,14 @@ export const DigitalMusicBingoBoard: React.FC<DigitalMusicBingoBoardProps> = ({
 
   return (
     <div className="space-y-4 text-left">
-      {/* Kontroller for lesbarhet (eldre-vennlig høy kontrast & stor skrift) */}
+      {/* Header & accessibility controls */}
       <div className="flex flex-wrap items-center justify-between gap-2 p-3 rounded-2xl bg-black/50 border border-amber-400/40">
         <div>
           <div className="text-xs font-black text-amber-300 uppercase tracking-wider">
-            🎵 Digitalt Musikkbingo-brett · Brett #{cardSeed} · Runde {snap.roundNumber}
+            🎵 {ui.musicTitle} · {ui.cardNumberPrefix}{cardSeed} · {ui.round} {snap.roundNumber}
           </div>
           <div className="text-xs text-slate-300 mt-0.5">
-            Lytt til lydklipp fra arrangøren og trykk på sangene du kjenner igjen på brettet ditt.
+            {ui.musicHallSubtitle}
           </div>
         </div>
 
@@ -181,7 +202,7 @@ export const DigitalMusicBingoBoard: React.FC<DigitalMusicBingoBoardProps> = ({
                 : 'bg-white/10 text-amber-100 border-white/20'
             }`}
           >
-            {largeFont ? 'Aa Ekstra stor skrift: PÅ' : 'Aa Normal skrift'}
+            Aa {largeFont ? '++' : '+'}
           </button>
 
           <button
@@ -192,22 +213,28 @@ export const DigitalMusicBingoBoard: React.FC<DigitalMusicBingoBoardProps> = ({
             }}
             className="min-h-[44px] px-3 py-1.5 rounded-xl text-xs font-bold bg-white/10 hover:bg-white/20 border border-white/20 text-white cursor-pointer"
           >
-            {lightPaperMode ? '🌙 Mørkt brett' : '☀️ Lyst papirbrett'}
+            {lightPaperMode ? '🌙' : '☀️'}
           </button>
 
           <span className="min-h-[44px] px-3 py-1.5 rounded-xl text-xs font-bold bg-black/40 border border-amber-500/35 text-amber-200/90 flex items-center gap-1.5 select-none">
             <span>🔒</span>
-            <span>Kun arrangør styrer ny runde</span>
+            <span>{ui.host}</span>
           </span>
         </div>
       </div>
 
-      {/* Aktiv sang-status fra arrangør */}
-      {currentSong && (
+      {newRoundBanner && (
+        <div className="p-3 rounded-2xl bg-emerald-500/25 border-2 border-emerald-400 text-emerald-100 font-black text-xs sm:text-sm text-center animate-pulse">
+          {newRoundBanner}
+        </div>
+      )}
+
+      {/* Current active song status from host */}
+      {currentSong ? (
         <div className="p-3.5 rounded-2xl bg-gradient-to-r from-amber-950/70 via-[#221509] to-emerald-950/60 border border-amber-400/50 flex flex-wrap items-center justify-between gap-2">
           <div>
             <div className="text-[11px] font-black uppercase tracking-wider text-amber-300">
-              🔊 Spilles nå fra arrangør:
+              🔊 {ui.musicCurrentClip}:
             </div>
             {snap.revealCurrentSong ? (
               <div className="font-heading font-black text-base sm:text-lg text-white">
@@ -215,30 +242,34 @@ export const DigitalMusicBingoBoard: React.FC<DigitalMusicBingoBoardProps> = ({
               </div>
             ) : (
               <div className="font-heading font-bold text-sm sm:text-base text-amber-100">
-                🎵 Hint: {currentSong.decade} · {currentSong.category} (Lytt etter melodien!)
+                🎵 {ui.musicHiddenSong} ({currentSong.decade} · {currentSong.category})
               </div>
             )}
           </div>
           <span className="text-xs font-mono font-bold text-emerald-300">
-            {snap.playedSongIds.length} sanger spilt
+            {snap.playedSongIds.length}
           </span>
+        </div>
+      ) : (
+        <div className="p-3 rounded-2xl bg-black/40 border border-amber-500/25 text-xs text-amber-200/80 text-center">
+          ⏳ {ui.musicWaitingHost}
         </div>
       )}
 
-      {/* Fremdrift, Milepæl-lås & Rop BINGO */}
+      {/* Progress, Milestones & Shout Music Bingo */}
       <div className="flex flex-wrap items-center justify-between gap-3 p-3.5 rounded-2xl bg-black/45 border border-white/15">
         <div className="flex flex-wrap items-center gap-3 text-sm font-bold">
           <span className="text-amber-200">
-            Krysset av: <strong className="font-mono text-white">{evalResult.markedCount} / 24</strong>
+            {ui.musicProgressLabel}: <strong className="font-mono text-white">{evalResult.markedCount} / 24</strong>
           </span>
           <span className="text-emerald-300">
-            Rekker: <strong className="font-mono text-white">{evalResult.linesCompleted}</strong>
+            {ui.linesCountLabel}: <strong className="font-mono text-white">{evalResult.linesCompleted}</strong>
           </span>
           <div className="flex flex-wrap items-center gap-1.5">
             {(['line1', 'line3', 'fullbrett'] as const).map((tier) => {
               const taken = claimedMilestones.includes(tier);
               const winner = milestoneWinners[tier];
-              const label = tier === 'line1' ? '1. rekke' : tier === 'line3' ? '3. rekker' : 'Fullt brett';
+              const label = formatMilestoneLabel(tier, lang);
               return (
                 <span
                   key={tier}
@@ -249,7 +280,7 @@ export const DigitalMusicBingoBoard: React.FC<DigitalMusicBingoBoardProps> = ({
                   }`}
                 >
                   {taken ? '✓' : '•'} {label}
-                  {winner ? ` (${winner})` : taken ? ' · Tatt' : ''}
+                  {winner ? ` (${winner})` : taken ? ` · ${ui.claimedBy}` : ''}
                 </span>
               );
             })}
@@ -269,27 +300,29 @@ export const DigitalMusicBingoBoard: React.FC<DigitalMusicBingoBoardProps> = ({
           {eligibleMusicClaim
             ? `📣 ${eligibleMusicClaim.label} 🎵`
             : claimedMilestones.includes('line3')
-            ? '🔒 Låst — fyll fullt brett'
+            ? `🔒 ${ui.milestoneFullbrett}`
             : claimedMilestones.includes('line1')
-            ? '🔒 Låst — fyll 3. rekker'
-            : '🔒 ROP MUSIKKBINGO (Fyll 1. rekke)'}
+            ? `🔒 ${ui.milestoneLine3}`
+            : `🔒 ${ui.musicShoutBtnPrefix} ${ui.milestoneLine1}`}
         </button>
       </div>
 
       {snap.lastClaim && snap.lastClaim.timestamp !== dismissedClaimTs && (() => {
-        const isFull = /fullt?\s*brett|full_?house|blackout/i.test(snap.lastClaim.pattern);
-        const isLine3 = !isFull && /3\s*\.?\s*rekke/i.test(snap.lastClaim.pattern);
-        const nextLevel = isFull ? 'Ny runde kan startes av arrangør' : isLine3 ? 'Fullt brett' : '3. rekker';
+        const isFull = Boolean(snap.lastClaim.isFullHouse) || /fullt?\s*brett|full_?house|blackout/i.test(snap.lastClaim.pattern);
+        const isLine3 = !isFull && (snap.lastClaim.milestone === 'line3' || /3\s*\.?\s*rekke|3\s*line/i.test(snap.lastClaim.pattern));
+        const patternDisplay = localizeBingoPattern(snap.lastClaim.pattern, lang);
         return (
           <div className="p-3.5 rounded-2xl bg-gradient-to-r from-amber-500/30 via-emerald-500/25 to-cyan-500/25 border-2 border-amber-300 text-amber-50 flex flex-wrap items-center justify-between gap-2 shadow-xl">
             <div className="space-y-0.5">
               <div className="text-xs sm:text-sm font-black text-amber-200">
-                🏆 {snap.lastClaim.playerName} har faktisk fylt {snap.lastClaim.pattern} og trykket MUSIKKBINGO!
+                🏆 {snap.lastClaim.playerName} {ui.shoutedBannerMid} {patternDisplay} {ui.shoutedBannerSuffix}
               </div>
               <div className="text-xs font-bold text-emerald-200">
                 {isFull
-                  ? '🔄 Fullt brett er oppnådd! Vent på at arrangøren starter ny runde.'
-                  : `➡️ Vi spiller videre nå til ${nextLevel}! (${isLine3 ? '1. og 3. rekker' : '1. rekke'} er låst)`}
+                  ? ui.newRoundStartsSoon
+                  : isLine3
+                  ? ui.continuesToFullbrett
+                  : ui.continuesToLine3}
               </div>
             </div>
             <button
@@ -297,7 +330,7 @@ export const DigitalMusicBingoBoard: React.FC<DigitalMusicBingoBoardProps> = ({
               onClick={() => setDismissedClaimTs(snap.lastClaim!.timestamp)}
               className="px-2.5 py-1 rounded-lg bg-black/40 hover:bg-black/60 text-xs font-bold text-amber-100 cursor-pointer shrink-0"
             >
-              OK
+              {ui.ok}
             </button>
           </div>
         );
@@ -315,7 +348,7 @@ export const DigitalMusicBingoBoard: React.FC<DigitalMusicBingoBoardProps> = ({
         </div>
       )}
 
-      {/* 5x5 Digitalt Musikkbingobrett */}
+      {/* 5x5 Digital Music Bingo Board */}
       <div
         className={`p-3 sm:p-4 rounded-3xl border-2 shadow-2xl ${
           lightPaperMode
@@ -323,6 +356,10 @@ export const DigitalMusicBingoBoard: React.FC<DigitalMusicBingoBoardProps> = ({
             : 'bg-[#120d08] border-amber-500/50 text-amber-50'
         }`}
       >
+        <div className="flex items-center justify-between mb-2 px-1 text-xs font-bold opacity-80">
+          <span>{ui.musicSongsGridTitle}</span>
+          <span>{ui.musicTapToMarkHint}</span>
+        </div>
         <div className="grid grid-cols-5 gap-1.5 sm:gap-2">
           {cardData.grid.map((row) =>
             row.map((cell) => {
@@ -338,9 +375,8 @@ export const DigitalMusicBingoBoard: React.FC<DigitalMusicBingoBoardProps> = ({
                   >
                     <span className="text-xl sm:text-2xl">🎵</span>
                     <span className="font-black text-xs sm:text-sm leading-tight mt-0.5">
-                      FRI RUTE
+                      {ui.freeSpaceLabel}
                     </span>
-                    <span className="text-[10px] font-bold opacity-85">Allsang!</span>
                   </div>
                 );
               }

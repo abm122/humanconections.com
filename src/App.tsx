@@ -36,7 +36,15 @@ import { GoldenCoinLogo } from './components/GoldenCoinLogo';
 import { RilMusicPlayer } from './components/RilMusicPlayer';
 import { WinnerTask, getWinnerTaskForLines } from './data/winnerTasks';
 import { LanguageSelector } from './components/LanguageSelector';
-import { useTranslation } from './services/i18n';
+import { useTranslation, SupportedLanguage } from './services/i18n';
+import {
+  getBingoUiTexts,
+  formatMilestoneLabel,
+  localizeBingoPattern,
+  localizeServerBingoMessage,
+} from './services/bingoUiI18n';
+import { getTitleScreenTexts } from './services/titleScreenI18n';
+import { musicBingoService } from './services/musicBingoService';
 import { progression, LevelInfo, DailyQuest } from './services/progression';
 import { socialSocket } from './services/socialSocket';
 import { ownerControl, SystemAnnouncement } from './services/ownerControl';
@@ -99,7 +107,7 @@ function generateBingoCard(prompts: string[], isNumerical: boolean = true): Bing
           id: `cell-${r}-${c}`,
           row: r,
           col: c,
-          text: 'GRATIS GNIST',
+          text: 'FREE',
           letter: 'N',
           number: 38,
           isFreeSpace: true,
@@ -198,9 +206,11 @@ interface EligibleBingoClaim {
 function getEligibleBingoClaimForPlayer(
   player: Player | undefined,
   calledBalls: CalledBall[],
-  roomClaimedMilestones: BingoMilestone[] = []
+  roomClaimedMilestones: BingoMilestone[] = [],
+  lang: SupportedLanguage = 'nb'
 ): EligibleBingoClaim | null {
   if (!player || !player.cards || player.cards.length === 0) return null;
+  const ui = getBingoUiTexts(lang);
   const claimed = Array.from(
     new Set<BingoMilestone>([...(player.claimedMilestones || []), ...roomClaimedMilestones])
   );
@@ -233,7 +243,7 @@ function getEligibleBingoClaimForPlayer(
     }
     if (res.completedLines >= 3 && bestThreeCardIdx === -1) {
       bestThreeCardIdx = cIdx;
-      bestThreeNumbers = winningNums.length >= 12 ? winningNums : allCardNums;
+      bestThreeNumbers = winningNums.length >= 10 ? winningNums : allCardNums;
     }
     if (res.completedLines >= 1 && bestOneCardIdx === -1) {
       bestOneCardIdx = cIdx;
@@ -247,7 +257,7 @@ function getEligibleBingoClaimForPlayer(
       pattern: 'FULLBRETT',
       isFullHouse: true,
       cardIndex: bestFullCardIdx,
-      label: '🏆 Rop BINGO! (Full brett)',
+      label: `🏆 ${ui.pressBingoBtn} (${ui.milestoneFullbrett})`,
       confirmedNumbers: bestFullNumbers,
     };
   }
@@ -258,7 +268,7 @@ function getEligibleBingoClaimForPlayer(
       pattern: '3. REKKER',
       isFullHouse: false,
       cardIndex: bestThreeCardIdx,
-      label: '🎉 Rop BINGO! (3. rekker)',
+      label: `🎉 ${ui.pressBingoBtn} (${ui.milestoneLine3})`,
       confirmedNumbers: bestThreeNumbers,
     };
   }
@@ -269,7 +279,7 @@ function getEligibleBingoClaimForPlayer(
       pattern: '1. REKKE',
       isFullHouse: false,
       cardIndex: bestOneCardIdx,
-      label: '🎉 Rop BINGO! (1. rekke)',
+      label: `🎉 ${ui.pressBingoBtn} (${ui.milestoneLine1})`,
       confirmedNumbers: bestOneNumbers,
     };
   }
@@ -278,7 +288,13 @@ function getEligibleBingoClaimForPlayer(
 }
 
 export default function App() {
-  const { t } = useTranslation();
+  const { t, lang } = useTranslation();
+  const ui = getBingoUiTexts(lang);
+  const ts = getTitleScreenTexts(lang);
+  const langRef = useRef<SupportedLanguage>(lang);
+  useEffect(() => {
+    langRef.current = lang;
+  }, [lang]);
   const [screen, setScreen] = useState<GameScreen>('TITLE');
   const [mode, setMode] = useState<GameMode>('ALL_IN_ONE');
   const [unifiedView, setUnifiedView] = useState<'both' | 'cards' | 'stage'>('both');
@@ -513,6 +529,17 @@ export default function App() {
     isFullHouse?: boolean;
     task: WinnerTask;
   } | null>(null);
+  const [activeClaimWinnerTask, setActiveClaimWinnerTask] = useState<WinnerTask | null>(null);
+  const [liveBingoShoutAlert, setLiveBingoShoutAlert] = useState<{
+    id: string;
+    playerName: string;
+    patternLabel: string;
+    tier: BingoMilestone;
+    isMusic?: boolean;
+    isFullHouse: boolean;
+    timestamp: number;
+  } | null>(null);
+  const liveShoutTimerRef = useRef<number | null>(null);
 
   const showCardActionNotice = useCallback((text: string, tone: 'warn' | 'ready' = 'warn') => {
     setCardActionNotice({ text, tone });
@@ -579,6 +606,7 @@ export default function App() {
       )
     );
     setRemoteBingoClaim(null);
+    setActiveClaimWinnerTask(null);
     setRoomClaimedMilestones([]);
     setMilestoneWinners({});
     setBingoProgressionBanner(null);
@@ -608,17 +636,32 @@ export default function App() {
       screenDeviceRef.current === 'big_screen'
     );
     if (inOnlineOrBigScreen) {
-      remoteBingo.claimBingo('FULLBRETT', cardIndex, true, winnerName, confirmedNumbers);
-      if (!socialSocket.getIsConnected() && !remoteBingo.getIsRemotePlayer()) {
-        if (!localNewRoundFallbackTimerRef.current) {
-          localNewRoundFallbackTimerRef.current = window.setTimeout(() => {
-            localNewRoundFallbackTimerRef.current = null;
-            applyLocalNewRoundReset();
-            setBingoRoundNumber((r) => r + 1);
-            setRoundResetNotice(`🔄 Ny runde startet etter Fullbrett BINGO av ${winnerName}!`);
-            window.setTimeout(() => setRoundResetNotice(null), 4500);
-          }, 4500);
-        }
+      remoteBingo.claimBingo(
+        'FULLBRETT',
+        cardIndex,
+        true,
+        winnerName,
+        confirmedNumbers,
+        calledBallsRef.current
+      );
+      if (!localNewRoundFallbackTimerRef.current) {
+        const fallbackDelay = remoteBingo.getIsRemotePlayer() ? 6500 : 5500;
+        localNewRoundFallbackTimerRef.current = window.setTimeout(() => {
+          localNewRoundFallbackTimerRef.current = null;
+          if (!remoteBingo.getIsRemotePlayer() && (remoteBingo.getHostCode() || remoteBingo.getCurrentRoomCode())) {
+            remoteBingo.broadcastRoundResetToRoom(winnerName);
+          } else if (remoteBingo.getIsRemotePlayer()) {
+            remoteBingo.requestBallSyncFromRoom();
+          }
+          const curUi = getBingoUiTexts(langRef.current);
+          const nextRoundNum = Math.max(remoteBingo.getRoundNumber() + 1, 2);
+          applyLocalNewRoundReset();
+          setBingoRoundNumber((r) => Math.max(r + 1, nextRoundNum));
+          setRoundResetNotice(
+            `🔄 ${curUi.roundAutoResetMsg.replace('{n}', String(nextRoundNum)).replace('{winner}', winnerName)}`
+          );
+          window.setTimeout(() => setRoundResetNotice(null), 5000);
+        }, fallbackDelay);
       }
       return true;
     }
@@ -704,12 +747,14 @@ export default function App() {
 
     const unsubHostParticipantJoin = remoteBingo.onParticipantJoined((p, total) => {
       if (remoteBingo.getIsRemotePlayer() || !remoteBingo.canActAsHost()) return;
+      const curUi = getBingoUiTexts(langRef.current);
       const activeCode = remoteBingo.getHostCode();
       const connectedCount = remoteBingo.getConnectedRemotePlayers().length;
       sounds.playPop(1.25);
       setHostNotificationsList(remoteBingo.getHostNotifications());
+      const joinMsg = curUi.participantJoinedRoom.replace('{name}', p.name);
       setHostJoinNotice(
-        `👋 ${p.name} ble med i ${p.game || 'spillet'}${activeCode ? ` (kode ${activeCode})` : ''}! (${connectedCount || total} tilkoblet)`
+        `👋 ${joinMsg}${activeCode ? ` (${curUi.code} ${activeCode})` : ''} (${curUi.remoteConnectedCount.replace('{n}', String(connectedCount || total))})`
       );
       setTimeout(() => setHostJoinNotice(null), 6000);
     });
@@ -749,10 +794,11 @@ export default function App() {
 
       // Advarsel før spilletiden er over (5 min for pakker / 2 min for 10-min prøve, pluss 1 minutt)
       if (!sessionTimer.isExpired() && sessionTimer.hasPaidAccess() && !remoteBingo.getIsRemotePlayer()) {
+        const curUi = getBingoUiTexts(langRef.current);
         if (remainingMs <= 60 * 1000 && remainingMs > 0) {
-          setTimeWarningNotice(`🚨 Siste minutt! Spillet avsluttes og vert/spiller logges automatisk ut om ${Math.ceil(remainingMs / 1000)}s.`);
+          setTimeWarningNotice(`${curUi.timeWarningPrefix} ${Math.ceil(remainingMs / 1000)}s`);
         } else if (remainingMs <= warningThresholdMs && remainingMs > 0) {
-          setTimeWarningNotice(`⚠️ Kun ${sessionTimer.getFormattedRemaining()} igjen av spilletiden! Verten og spillere logges automatisk ut ved 00:00.`);
+          setTimeWarningNotice(`⚠️ ${sessionTimer.getFormattedRemaining()} ${curUi.timeWarningSuffix}`);
         } else {
           setTimeWarningNotice(null);
         }
@@ -794,6 +840,39 @@ export default function App() {
     evaluateSessionState();
     const unsubSession = sessionTimer.subscribe(evaluateSessionState);
 
+    const triggerLiveShoutToast = (
+      playerName: string,
+      tier: BingoMilestone,
+      isFullHouse: boolean,
+      timestamp: number,
+      id?: string,
+      isMusic?: boolean
+    ) => {
+      const curLang = langRef.current;
+      const patternLabel = formatMilestoneLabel(tier, curLang);
+      if (isFullHouse) {
+        sounds.playBingoWin();
+      } else {
+        sounds.playLineComplete();
+      }
+      setLiveBingoShoutAlert({
+        id: id || `${playerName}-${tier}-${timestamp}`,
+        playerName,
+        patternLabel,
+        tier,
+        isMusic,
+        isFullHouse,
+        timestamp,
+      });
+      if (liveShoutTimerRef.current) {
+        window.clearTimeout(liveShoutTimerRef.current);
+      }
+      liveShoutTimerRef.current = window.setTimeout(() => {
+        setLiveBingoShoutAlert(null);
+        liveShoutTimerRef.current = null;
+      }, 7500);
+    };
+
     const unsubRemoteClaim = remoteBingo.onClaim((claim) => {
       setRemoteBingoClaim(claim);
       const tier: BingoMilestone = claim.milestone
@@ -803,6 +882,7 @@ export default function App() {
         : /3\s*\.?\s*rekke/i.test(claim.pattern)
         ? 'line3'
         : 'line1';
+      const isFullHouse = Boolean(claim.isFullHouse) || tier === 'fullbrett';
       if (Array.isArray(claim.claimedMilestones)) {
         setRoomClaimedMilestones(claim.claimedMilestones);
       } else {
@@ -817,28 +897,89 @@ export default function App() {
       if (claim.milestoneWinners) {
         setMilestoneWinners(claim.milestoneWinners);
       }
-      const tierText = tier === 'fullbrett' ? 'Fullt brett' : tier === 'line3' ? '3. rekker' : '1. rekke';
-      const nextText =
-        tier === 'fullbrett'
-          ? '🔄 Ny runde starter straks!'
-          : tier === 'line3'
-          ? '➡️ Vi spiller videre til Full brett!'
-          : '➡️ Vi spiller videre til 3. rekker!';
+      const curUi = getBingoUiTexts(langRef.current);
+      const tierText = formatMilestoneLabel(tier, langRef.current);
+      const nextText = isFullHouse
+        ? `🔄 ${curUi.newRoundStartsSoon}`
+        : tier === 'line3'
+        ? `➡️ ${curUi.continuesToFullbrett}`
+        : `➡️ ${curUi.continuesToLine3}`;
       setBingoProgressionBanner(
-        `🏆 ${claim.playerName} har faktisk fylt ${tierText} og trykket BINGO! ${nextText}`
+        `🏆 ${claim.playerName} ${curUi.shoutedBannerPrefix} ${tierText} ${curUi.shoutedBannerSuffix} ${nextText}`.trim()
       );
       setHostNotificationsList(remoteBingo.getHostNotifications());
+      triggerLiveShoutToast(claim.playerName, tier, isFullHouse, claim.timestamp, claim.claimId, false);
+
+      if (isFullHouse && !localNewRoundFallbackTimerRef.current) {
+        const delayMs = remoteBingo.getIsRemotePlayer() ? 6500 : 5500;
+        localNewRoundFallbackTimerRef.current = window.setTimeout(() => {
+          localNewRoundFallbackTimerRef.current = null;
+          if (!remoteBingo.getIsRemotePlayer() && (remoteBingo.getHostCode() || remoteBingo.getCurrentRoomCode())) {
+            remoteBingo.broadcastRoundResetToRoom(claim.playerName);
+          } else if (remoteBingo.getIsRemotePlayer()) {
+            remoteBingo.requestBallSyncFromRoom();
+          }
+          const latestUi = getBingoUiTexts(langRef.current);
+          const nextRoundNum = Math.max(remoteBingo.getRoundNumber() + 1, 2);
+          applyLocalNewRoundReset();
+          setBingoRoundNumber((r) => Math.max(r + 1, nextRoundNum));
+          setRoundResetNotice(
+            `🔄 ${latestUi.roundAutoResetMsg.replace('{n}', String(nextRoundNum)).replace('{winner}', claim.playerName)}`
+          );
+          window.setTimeout(() => setRoundResetNotice(null), 5500);
+        }, delayMs);
+      }
+    });
+
+    const unsubMusicClaim = musicBingoService.onClaim((claim) => {
+      const tier: BingoMilestone = claim.milestone
+        ? claim.milestone
+        : claim.isFullHouse || /fullt?\s*brett|fullbrett/i.test(claim.pattern)
+        ? 'fullbrett'
+        : /3\s*\.?\s*rekke/i.test(claim.pattern)
+        ? 'line3'
+        : 'line1';
+      const isFullHouse = Boolean(claim.isFullHouse) || tier === 'fullbrett';
+      triggerLiveShoutToast(claim.playerName, tier, isFullHouse, claim.timestamp, claim.claimId, true);
+      setHostNotificationsList(remoteBingo.getHostNotifications());
+      setRemoteBingoClaim({
+        claimId: claim.claimId,
+        userId: 'music',
+        playerName: claim.playerName,
+        pattern: claim.pattern,
+        milestone: tier,
+        cardIndex: 0,
+        isFullHouse,
+        roundNumber: claim.roundNumber,
+        claimedMilestones: claim.claimedMilestones,
+        milestoneWinners: claim.milestoneWinners,
+        autoNewRoundDelayMs: claim.autoNewRoundDelayMs,
+        timestamp: claim.timestamp,
+      });
+    });
+
+    const unsubMusicNewRound = musicBingoService.onNewRound((ev) => {
+      const curUi = getBingoUiTexts(langRef.current);
+      sounds.playPop(1.3);
+      setHostNotificationsList(remoteBingo.getHostNotifications());
+      setRoundResetNotice(
+        ev.winnerName
+          ? `🔄 ${curUi.roundAutoResetMsg.replace('{n}', String(ev.roundNumber)).replace('{winner}', ev.winnerName)}`
+          : `🔄 ${curUi.roundManualResetMsg.replace('{n}', String(ev.roundNumber))}`
+      );
+      window.setTimeout(() => setRoundResetNotice(null), 5500);
     });
 
     const unsubNewRound = remoteBingo.onNewRound((ev) => {
+      const curUi = getBingoUiTexts(langRef.current);
       applyLocalNewRoundReset();
       setBingoRoundNumber(ev.roundNumber);
       setBingoProgressionBanner(null);
       sounds.playPop(1.3);
       setRoundResetNotice(
         ev.winnerName
-          ? `🔄 Runde ${ev.roundNumber} startet automatisk etter Fullbrett BINGO av ${ev.winnerName}!`
-          : `🔄 Ny bingorunde (Runde ${ev.roundNumber}) er startet!`
+          ? `🔄 ${curUi.roundAutoResetMsg.replace('{n}', String(ev.roundNumber)).replace('{winner}', ev.winnerName)}`
+          : `🔄 ${curUi.roundManualResetMsg.replace('{n}', String(ev.roundNumber))}`
       );
       window.setTimeout(() => setRoundResetNotice(null), 5500);
     });
@@ -847,23 +988,41 @@ export default function App() {
       remoteBingo.provideBallSyncToRoom(calledBallsRef.current, requesterId);
     });
 
-    const unsubClaimRejected = socialSocket.on('bingo:claim_rejected', (payload: unknown) => {
-      const data = payload as {
-        message?: string;
-        claimedMilestones?: BingoMilestone[];
-        milestoneWinners?: Partial<Record<BingoMilestone, string>>;
-      };
+    const handleClaimRejectionPayload = (data: {
+      message?: string;
+      claimedMilestones?: BingoMilestone[];
+      milestoneWinners?: Partial<Record<BingoMilestone, string>>;
+    }) => {
+      if (localNewRoundFallbackTimerRef.current) {
+        window.clearTimeout(localNewRoundFallbackTimerRef.current);
+        localNewRoundFallbackTimerRef.current = null;
+      }
       if (Array.isArray(data?.claimedMilestones)) {
         setRoomClaimedMilestones(data.claimedMilestones);
       }
       if (data?.milestoneWinners && typeof data.milestoneWinners === 'object') {
         setMilestoneWinners(data.milestoneWinners);
       }
+      setBingoProgressionBanner(null);
       sounds.playClick();
       showCardActionNotice(
-        data?.message || 'Alle tall i rekken må være trukket og bekreftet før du kan rope BINGO!',
+        localizeServerBingoMessage(data?.message || '', langRef.current),
         'warn'
       );
+    };
+
+    const unsubClaimRejected = socialSocket.on('bingo:claim_rejected', (payload: unknown) => {
+      if (payload && typeof payload === 'object') {
+        handleClaimRejectionPayload(payload as {
+          message?: string;
+          claimedMilestones?: BingoMilestone[];
+          milestoneWinners?: Partial<Record<BingoMilestone, string>>;
+        });
+      }
+    });
+
+    const unsubRemoteClaimRejected = remoteBingo.onClaimRejected((payload) => {
+      handleClaimRejectionPayload(payload);
     });
 
     const unsubSyncProvided = remoteBingo.onSyncProvided((balls) => {
@@ -1076,12 +1235,18 @@ export default function App() {
       unsubAuth();
       unsubSession();
       unsubRemoteClaim();
+      unsubMusicClaim();
+      unsubMusicNewRound();
       unsubNewRound();
       unsubSyncReq();
       unsubClaimRejected();
+      unsubRemoteClaimRejected();
       unsubSyncProvided();
       if (cardNoticeTimerRef.current) {
         window.clearTimeout(cardNoticeTimerRef.current);
+      }
+      if (liveShoutTimerRef.current) {
+        window.clearTimeout(liveShoutTimerRef.current);
       }
       if (typeof window !== 'undefined') {
         window.removeEventListener('resize', handleResize);
@@ -1234,10 +1399,10 @@ export default function App() {
     progression.recordMixerAgitate();
     particleRef.current?.burst(window.innerWidth / 2, window.innerHeight * 0.35, 18);
     showCardActionNotice(
-      '🔄 Trommelen er fylt og blandet på nytt med 75 kuler — aktive bingokort og avkryssinger beholdes!',
+      `🔄 ${ui.refillBtn}`,
       'ready'
     );
-  }, [showCardActionNotice]);
+  }, [showCardActionNotice, ui.refillBtn]);
 
   const handleTriggerAgitateMix = useCallback((_speed: number = 1.0) => {
     sounds.playCageTumble(1.5);
@@ -1326,7 +1491,7 @@ export default function App() {
       const playerName =
         customPlayerNames && customPlayerNames[i]?.trim()
           ? customPlayerNames[i].trim()
-          : (count === 1 ? socialSocket.getProfile().name : `Player ${i + 1}`);
+          : (count === 1 ? socialSocket.getProfile().name : `${ui.player} ${i + 1}`);
 
       newPlayers.push({
         id: `p-${i + 1}`,
@@ -1466,7 +1631,7 @@ export default function App() {
     if (willBeMarked && !isCellBallDrawn(cell, calledBalls)) {
       sounds.playClick();
       showCardActionNotice(
-        `⏳ ${cell.letter}-${cell.number} («${cell.text}») er ikke trukket ennå! Bekreft bare tall eller ord som faktisk er trukket.`,
+        `⏳ ${cell.letter}-${cell.number}: ${ui.notDrawnYetWarn}`,
         'warn'
       );
       return;
@@ -1503,23 +1668,23 @@ export default function App() {
 
     player.linesCompleted = bestCardLines;
 
-    const unlockedClaim = getEligibleBingoClaimForPlayer(player, calledBalls, roomClaimedMilestones);
+    const unlockedClaim = getEligibleBingoClaimForPlayer(player, calledBalls, roomClaimedMilestones, lang);
     if (unlockedClaim && willBeMarked) {
       sounds.playLineComplete();
       particleRef.current?.burst(window.innerWidth / 2, window.innerHeight * 0.4, 20);
       showCardActionNotice(
-        `✨ ${unlockedClaim.pattern} er fylt på brettet ditt! Trykk fysisk på «${unlockedClaim.label}» for å melde inn bingo!`,
+        `✨ ${localizeBingoPattern(unlockedClaim.pattern, lang)} — ${unlockedClaim.label}`,
         'ready'
       );
     } else if (!unlockedClaim && willBeMarked && bestCardLines >= 1) {
       if (bestCardLines >= 3 && roomClaimedMilestones.includes('line3') && !roomClaimedMilestones.includes('fullbrett')) {
         showCardActionNotice(
-          '🔒 3. rekker er allerede ropt i denne runden — fortsett til Full brett for å låse opp «Rop BINGO!»',
+          `🔒 ${ui.milestoneLine3} ${ui.claimedBy} — ${ui.continuesToFullbrett}`,
           'warn'
         );
       } else if (bestCardLines >= 1 && bestCardLines < 3 && roomClaimedMilestones.includes('line1')) {
         showCardActionNotice(
-          '🔒 1. rekke er allerede ropt i denne runden — fortsett til 3. rekker for å låse opp «Rop BINGO!»',
+          `🔒 ${ui.milestoneLine1} ${ui.claimedBy} — ${ui.continuesToLine3}`,
           'warn'
         );
       }
@@ -1541,23 +1706,23 @@ export default function App() {
   const handlePhysicalBingoCall = (targetPlayerIndex?: number) => {
     const pIdx = targetPlayerIndex !== undefined ? targetPlayerIndex : activePlayerIndex;
     const player = players[pIdx] || players[0];
-    const eligible = getEligibleBingoClaimForPlayer(player, calledBalls, roomClaimedMilestones);
+    const eligible = getEligibleBingoClaimForPlayer(player, calledBalls, roomClaimedMilestones, lang);
 
     if (!player || !eligible) {
       sounds.playClick();
       if (roomClaimedMilestones.includes('line3') && !roomClaimedMilestones.includes('fullbrett')) {
         showCardActionNotice(
-          '🔒 1. og 3. rekke er allerede ropt! Bingorop-knappen er deaktivert til fullt brett er fullført.',
+          `🔒 ${ui.milestoneLine3} ${ui.claimedBy} — ${ui.continuesToFullbrett}`,
           'warn'
         );
       } else if (roomClaimedMilestones.includes('line1') && !roomClaimedMilestones.includes('line3')) {
         showCardActionNotice(
-          '🔒 1. rekke er allerede ropt av en deltaker! Bingorop-knappen er deaktivert til 3. rekker er fullført.',
+          `🔒 ${ui.milestoneLine1} ${ui.claimedBy} — ${ui.continuesToLine3}`,
           'warn'
         );
       } else {
         showCardActionNotice(
-          '🔒 Du kan ikke rope BINGO ennå! Bekreft først trukne tall/ord til du har 1. rekke, 3. rekker (loddrett, vannrett eller kryssende) eller fullt brett.',
+          `🔒 ${ui.noEligibleLineYet}`,
           'warn'
         );
       }
@@ -1612,7 +1777,7 @@ export default function App() {
       progression.recordBingoWin();
       ownerControl.recordBingoWon();
       particleRef.current?.celebrateBingo();
-      socialSocket.broadcastAchievement(`${player.name} fullførte FULLBRETT BINGO!`);
+      socialSocket.broadcastAchievement(`${player.name} — ${ui.milestoneFullbrett} BINGO!`);
       const handledOnlineOrBigScreen = triggerFullbrettClaimAndRound(
         player.name,
         eligible.cardIndex,
@@ -1630,22 +1795,14 @@ export default function App() {
       progression.recordLineWin();
       particleRef.current?.celebrateBingo();
 
-      const task = getWinnerTaskForLines(milestoneLines, false);
-      setWinnerModalTask({
-        isOpen: true,
-        winnerName: player.name,
-        linesCount: milestoneLines,
-        isFullHouse: false,
-        task,
-      });
-
+      const task = getWinnerTaskForLines(milestoneLines, false, lang);
       const nextTargetText =
         eligible.milestone === 'line3'
-          ? '➡️ Vi spiller videre til Full brett!'
-          : '➡️ Vi spiller videre til 3. rekker!';
-      const tierText = eligible.milestone === 'line3' ? '3. rekker' : '1. rekke';
+          ? `➡️ ${ui.continuesToFullbrett}`
+          : `➡️ ${ui.continuesToLine3}`;
+      const tierText = formatMilestoneLabel(eligible.milestone, lang);
       setBingoProgressionBanner(
-        `🏆 ${player.name} har faktisk fylt ${tierText} og trykket BINGO! ${nextTargetText}`
+        `🏆 ${player.name} ${ui.shoutedBannerPrefix} ${tierText} ${ui.shoutedBannerSuffix} ${nextTargetText}`.trim()
       );
 
       const inRoom = Boolean(
@@ -1655,14 +1812,24 @@ export default function App() {
         screenDeviceRef.current === 'big_screen'
       );
       if (inRoom) {
+        // Attach winnerTask to RemoteBingoClaimModal so only ONE modal displays cleanly
+        setActiveClaimWinnerTask(task);
         remoteBingo.claimBingo(
           eligible.pattern,
           eligible.cardIndex,
           false,
           player.name,
-          eligible.confirmedNumbers
+          eligible.confirmedNumbers,
+          calledBallsRef.current
         );
       } else {
+        setWinnerModalTask({
+          isOpen: true,
+          winnerName: player.name,
+          linesCount: milestoneLines,
+          isFullHouse: false,
+          task,
+        });
         remoteBingo.recordBingoActivityLocal(player.name, eligible.milestone, eligible.pattern);
         setHostNotificationsList(remoteBingo.getHostNotifications());
       }
@@ -1691,11 +1858,9 @@ export default function App() {
   // Host ban action to remove and ban disruptive participants
   const handleBanPlayer = (playerName: string, reason?: string) => {
     sounds.playClick();
-    ownerControl.banParticipant(playerName, reason || 'Forstyrrende oppførsel i fellesskapet');
+    ownerControl.banParticipant(playerName, reason || ui.bannedDesc);
     setPlayers((prev) => prev.filter((p) => p.name.toLowerCase() !== playerName.toLowerCase()));
-    setBannedNotice(
-      `Deltaker «${playerName}» ble utestengt fra bingosesjonen av verten for å bevare sosial trivsel og trygghet.`
-    );
+    setBannedNotice(`${playerName}: ${reason || ui.bannedDesc}`);
   };
 
   // Start a fresh Bingo round for current room (keeps room code & participants, resets balls & cards)
@@ -1710,7 +1875,7 @@ export default function App() {
     }
     sounds.playPop(1.2);
     applyLocalNewRoundReset();
-    if (socialSocket.getIsConnected() && (remoteBingo.getHostCode() || remoteBingo.getCurrentRoomCode())) {
+    if (remoteBingo.getHostCode() || remoteBingo.getCurrentRoomCode()) {
       remoteBingo.broadcastRoundResetToRoom();
     } else {
       setBingoRoundNumber((r) => r + 1);
@@ -1764,6 +1929,42 @@ export default function App() {
       {/* 60fps Particle & Confetti Canvas */}
       <ParticleCanvas ref={particleRef} />
 
+      {/* High-Priority Live BINGO Shout Banner (visible even over open Host/Participant modals) */}
+      {liveBingoShoutAlert && (
+        <div
+          role="alert"
+          className={`fixed top-4 left-1/2 -translate-x-1/2 z-[80] w-[94%] max-w-xl px-4 py-3 rounded-2xl shadow-2xl border-2 border-white flex items-center justify-between gap-3 animate-bounce ${
+            liveBingoShoutAlert.isFullHouse
+              ? 'bg-gradient-to-r from-amber-400 via-yellow-300 to-rose-400 text-slate-950'
+              : 'bg-gradient-to-r from-emerald-400 via-teal-400 to-amber-300 text-slate-950'
+          }`}
+        >
+          <div className="flex items-center gap-2.5 min-w-0">
+            <span className="text-2xl shrink-0">{liveBingoShoutAlert.isMusic ? '🎵' : liveBingoShoutAlert.isFullHouse ? '🏆' : '📣'}</span>
+            <div className="min-w-0">
+              <div className="font-heading font-black text-xs sm:text-sm truncate">
+                {liveBingoShoutAlert.playerName} {ui.shoutedBannerPrefix} {liveBingoShoutAlert.patternLabel} {ui.shoutedBannerSuffix}
+              </div>
+              <div className="text-[11px] font-extrabold opacity-90 truncate">
+                {liveBingoShoutAlert.isFullHouse
+                  ? ui.newRoundStartsSoon
+                  : liveBingoShoutAlert.tier === 'line3'
+                  ? ui.continuesToFullbrett
+                  : ui.continuesToLine3}
+              </div>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setLiveBingoShoutAlert(null)}
+            className="px-2 py-1 rounded-lg bg-slate-950/15 hover:bg-slate-950/25 font-black text-xs cursor-pointer shrink-0"
+            aria-label={ui.close}
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       {/* Real-time System / Host Broadcast Announcement Banner */}
       {activeAnnouncement && (
         <div className="relative z-50 bg-gradient-to-r from-amber-500 via-amber-400 to-amber-500 text-slate-950 px-4 py-2 text-xs font-bold flex items-center justify-between shadow-xl border-b border-amber-300">
@@ -1778,7 +1979,7 @@ export default function App() {
                 : '📢'}
             </span>
             <span className="font-heading font-black tracking-wide uppercase text-[10px] bg-slate-950 text-amber-300 px-2 py-0.5 rounded-full shrink-0">
-              Vertsmelding ({activeAnnouncement.author})
+              {ui.host} ({activeAnnouncement.author})
             </span>
             <span className="font-extrabold truncate text-slate-950">{activeAnnouncement.message}</span>
           </div>
@@ -1788,7 +1989,7 @@ export default function App() {
               ownerControl.dismissActiveAnnouncement();
             }}
             className="text-slate-950 hover:text-black font-black text-xs ml-3 p-1 rounded cursor-pointer"
-            title="Lukk melding"
+            title={ui.close}
           >
             ✕
           </button>
@@ -1797,7 +1998,7 @@ export default function App() {
 
       {/* Host Join Notification Toast */}
       {hostJoinNotice && (
-        <div className="fixed top-6 right-4 sm:right-6 z-50 bg-gradient-to-r from-emerald-500 via-teal-500 to-cyan-500 text-slate-950 px-4 py-3 rounded-2xl shadow-2xl border-2 border-white font-heading font-black text-xs sm:text-sm flex items-center gap-3 animate-fadeIn max-w-sm">
+        <div className="fixed top-6 right-4 sm:right-6 z-[75] bg-gradient-to-r from-emerald-500 via-teal-500 to-cyan-500 text-slate-950 px-4 py-3 rounded-2xl shadow-2xl border-2 border-white font-heading font-black text-xs sm:text-sm flex items-center gap-3 animate-fadeIn max-w-sm">
           <span>{hostJoinNotice}</span>
           <button
             type="button"
@@ -1811,7 +2012,7 @@ export default function App() {
 
       {/* New Round Started Toast */}
       {roundResetNotice && (
-        <div className="fixed top-20 right-4 sm:right-6 z-50 bg-gradient-to-r from-amber-400 via-yellow-400 to-emerald-400 text-slate-950 px-4 py-3 rounded-2xl shadow-2xl border-2 border-white font-heading font-black text-xs sm:text-sm flex items-center gap-3 animate-fadeIn max-w-sm">
+        <div className="fixed top-20 right-4 sm:right-6 z-[75] bg-gradient-to-r from-amber-400 via-yellow-400 to-emerald-400 text-slate-950 px-4 py-3 rounded-2xl shadow-2xl border-2 border-white font-heading font-black text-xs sm:text-sm flex items-center gap-3 animate-fadeIn max-w-sm">
           <span>{roundResetNotice}</span>
           <button
             type="button"
@@ -1825,16 +2026,16 @@ export default function App() {
 
       {/* Level Up Celebration Banner */}
       {levelUpToast && (
-        <div className="fixed top-6 left-1/2 -translate-x-1/2 z-50 bg-gradient-to-r from-amber-400 via-amber-300 to-amber-500 text-slate-950 px-6 py-3 rounded-2xl shadow-2xl border-2 border-white font-heading font-black text-sm flex items-center gap-3 animate-bounce">
+        <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[75] bg-gradient-to-r from-amber-400 via-amber-300 to-amber-500 text-slate-950 px-6 py-3 rounded-2xl shadow-2xl border-2 border-white font-heading font-black text-sm flex items-center gap-3 animate-bounce">
           <span className="text-2xl">{levelUpToast.badgeIcon}</span>
           <div>
             <div className="text-xs uppercase tracking-wider font-extrabold text-amber-900">
-              Level Up! You are now:
+              {ui.levelUpTitle}
             </div>
-            <div className="text-base font-black">{levelUpToast.title} (Level {levelUpToast.level})</div>
+            <div className="text-base font-black">{levelUpToast.title} (Lvl {levelUpToast.level})</div>
           </div>
           <span className="text-2xs bg-slate-950 text-amber-300 px-2 py-0.5 rounded-full font-bold ml-2">
-            Unlocked: {levelUpToast.perk}
+            ✨ {levelUpToast.perk}
           </span>
         </div>
       )}
@@ -1899,7 +2100,8 @@ export default function App() {
         const eligibleBingoClaim = getEligibleBingoClaimForPlayer(
           activePlayer,
           calledBalls,
-          roomClaimedMilestones
+          roomClaimedMilestones,
+          lang
         );
         const activeCardForEval = activePlayer
           ? activePlayer.cards[activePlayer.activeCardIndex || 0] || activePlayer.cards[0]
@@ -1930,7 +2132,7 @@ export default function App() {
                     {timeWarningNotice}
                   </div>
                   <p className="text-[11px] text-amber-200/80">
-                    Forleng med Visa, Mastercard eller Apple Pay for å unngå automatisk avslutning.
+                    {ts.timeWarningDesc}
                   </p>
                 </div>
               </div>
@@ -1941,16 +2143,16 @@ export default function App() {
                 }}
                 className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 text-white font-black text-xs shrink-0 cursor-pointer shadow-lg flex items-center gap-1.5"
               >
-                <span>💳 Forleng med Kort / Pay ➔</span>
+                <span>💳 {ui.extendTimeBtn} ➔</span>
               </button>
             </div>
           )}
 
-          {/* UNIFIED STREAMLINED TOP HUD BAR — Tight Cohesive Flow (Zero Empty Holes Between Headings) */}
+          {/* UNIFIED STREAMLINED TOP HUD BAR */}
           <header
             className="relative z-30 w-fit max-w-full mx-auto px-3 sm:px-4 py-2 mb-3 rounded-2xl bg-black/55 backdrop-blur-md border border-amber-500/25 shadow-xl flex flex-wrap items-center justify-center gap-2"
           >
-            {/* Left Zone: Startmeny + Romkode + Subtle Hairline Divider + View/Format/Screen Controls */}
+            {/* Left Zone */}
             <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 min-w-0">
               <button
                 onClick={() => {
@@ -1958,11 +2160,11 @@ export default function App() {
                   setScreen('TITLE');
                 }}
                 className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-black/60 hover:bg-black/80 border border-amber-500/40 text-amber-200 text-xs font-bold transition-all cursor-pointer shadow whitespace-nowrap"
-                title="Gå tilbake til startmenyen"
+                title={ui.backToStart}
               >
                 <GoldenCoinLogo size="sm" />
                 <span className="font-heading font-black text-xs text-amber-200">
-                  ⇦ Startmeny
+                  ⇦ {ui.startMenu}
                 </span>
                 {theme === 'ril' && (
                   <span className="hidden sm:inline text-[10px] font-black text-emerald-300">· RIL</span>
@@ -1975,15 +2177,15 @@ export default function App() {
                   setIsRemoteBingoOpen(true);
                 }}
                 className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-cyan-950/80 hover:bg-cyan-900 border border-cyan-400/50 text-cyan-200 text-xs font-bold transition-all cursor-pointer shadow whitespace-nowrap"
-                title="Se åpen romkode, koble til mobil eller åpne deltakerliste"
+                title={ui.openRemoteBtn}
               >
                 <span>📡</span>
                 <span className="font-mono font-black text-white text-xs">
                   {isRemoteParticipant
-                    ? `Rom: ${remoteBingo.getCurrentRoomCode() || 'Aktiv'}`
+                    ? `${ui.code}: ${remoteBingo.getCurrentRoomCode() || ui.live}`
                     : remoteBingo.getHostCode()
                     ? `${remoteBingo.getHostCode()}`
-                    : 'Rom'}
+                    : ui.code}
                 </span>
                 <span className="text-[11px] font-black text-emerald-300 font-mono tabular-nums">
                   · R{bingoRoundNumber} · 👥 {players.length + remoteParticipantsList.length}
@@ -2078,7 +2280,7 @@ export default function App() {
                 </button>
               </div>
 
-              {/* Skjermstørrelse Rullegardin (spares plass og unngår overlapp i toppmenyen) */}
+              {/* Skjermstørrelse Rullegardin */}
               <div className="relative shrink-0" ref={playScreenRef}>
                 <button
                   type="button"
@@ -2093,15 +2295,15 @@ export default function App() {
                       ? 'bg-amber-400 text-slate-950 border-amber-300 font-black'
                       : 'bg-black/60 border-amber-500/35 text-amber-100 hover:border-amber-400'
                   }`}
-                  title="Velg skjermstørrelse (Mobil, PC eller TV / Prosjektor)"
+                  title={ui.screenSizeLabel}
                 >
                   <span>{screenDevice === 'mobile' ? '📱' : screenDevice === 'big_screen' ? '📺' : '💻'}</span>
                   <span>
                     {screenDevice === 'mobile'
-                      ? 'Mobil'
+                      ? ui.mobile
                       : screenDevice === 'big_screen'
-                      ? 'TV / Prosjektor'
-                      : 'PC'}
+                      ? ui.tvProjector
+                      : ui.pc}
                   </span>
                   <span className="text-[10px] opacity-80">{isPlayScreenMenuOpen ? '▲' : '▼'}</span>
                 </button>
@@ -2109,9 +2311,9 @@ export default function App() {
                 {isPlayScreenMenuOpen && (
                   <div className="absolute left-0 mt-1.5 w-52 rounded-2xl bg-[#181009] border border-amber-400/50 shadow-2xl p-1.5 z-50 space-y-1 text-left">
                     {[
-                      { id: 'mobile' as const, icon: '📱', label: 'Mobil', desc: 'Liten skjerm & touch' },
-                      { id: 'desktop' as const, icon: '💻', label: 'PC / Nettbrett', desc: 'Standard side-ved-side' },
-                      { id: 'big_screen' as const, icon: '📺', label: 'TV / Prosjektor', desc: 'Stort oppsett for sal' },
+                      { id: 'mobile' as const, icon: '📱', label: ts.screenMobile },
+                      { id: 'desktop' as const, icon: '💻', label: ts.screenDesktop },
+                      { id: 'big_screen' as const, icon: '📺', label: ts.screenBigScreen },
                     ].map((opt) => (
                       <button
                         key={opt.id}
@@ -2127,16 +2329,7 @@ export default function App() {
                         }`}
                       >
                         <span className="text-base">{opt.icon}</span>
-                        <div className="min-w-0">
-                          <div className="leading-tight">{opt.label}</div>
-                          <div
-                            className={`text-[10px] leading-tight ${
-                              screenDevice === opt.id ? 'text-slate-900/80' : 'text-amber-300/65'
-                            }`}
-                          >
-                            {opt.desc}
-                          </div>
-                        </div>
+                        <div className="min-w-0 leading-tight">{opt.label}</div>
                       </button>
                     ))}
                   </div>
@@ -2155,7 +2348,7 @@ export default function App() {
 
             <span className="hidden lg:block h-5 w-px bg-amber-500/25 shrink-0" aria-hidden="true" />
 
-            {/* Essential Host Shortcuts + Quiz & Memory Rullegardin + Verktøy + Language + Sound + Pause */}
+            {/* Essential Host Shortcuts + Quiz & Memory + Tools + Language + Sound + Pause */}
             <div className="flex flex-wrap items-center justify-center gap-1.5 shrink-0">
               {!isRemoteParticipant && (
                 <button
@@ -2164,7 +2357,7 @@ export default function App() {
                     handleOpenAudience();
                   }}
                   className="px-2.5 py-1.5 rounded-lg bg-amber-500/20 border border-amber-400/50 hover:border-amber-300 text-amber-100 text-xs font-bold transition-all flex items-center gap-1 cursor-pointer whitespace-nowrap"
-                  title="Publikum Storskjerm / TV-visning (A)"
+                  title={t('audience_tv')}
                 >
                   <span>📺</span>
                   <span className="hidden sm:inline">{t('audience_tv')}</span>
@@ -2186,10 +2379,10 @@ export default function App() {
                         ? 'bg-purple-500 text-white border-purple-300 font-black'
                         : 'bg-purple-600/30 border-purple-400/50 hover:border-purple-300 text-purple-100'
                     }`}
-                    title="Åpne Quiz eller Memory (VoksenQuiz, FamilieQuiz, JuleQuiz, Senior Grenland Quiz, Memory)"
+                    title={ts.quizAndMemoryTitle}
                   >
                     <span>🎭</span>
-                    <span>Quiz &amp; Memory</span>
+                    <span>{ts.quizAndMemory}</span>
                     <span className="text-[10px] opacity-80">{isPlayQuizMenuOpen ? '▲' : '▼'}</span>
                   </button>
 
@@ -2205,10 +2398,7 @@ export default function App() {
                         className="w-full px-3 py-2 rounded-xl text-left text-xs text-purple-100 hover:bg-purple-500/25 font-bold flex items-center gap-2.5 cursor-pointer"
                       >
                         <span className="text-base">🎭</span>
-                        <div>
-                          <div>VoksenQuiz</div>
-                          <div className="text-[10px] text-purple-300/70 font-normal">Kveldsshow · Live &amp; Lagspill</div>
-                        </div>
+                        <div>{ts.quizLabel}</div>
                       </button>
                       <button
                         type="button"
@@ -2220,10 +2410,7 @@ export default function App() {
                         className="w-full px-3 py-2 rounded-xl text-left text-xs text-amber-100 hover:bg-amber-500/25 font-bold flex items-center gap-2.5 cursor-pointer"
                       >
                         <span className="text-base">🎈</span>
-                        <div>
-                          <div>FamilieQuiz</div>
-                          <div className="text-[10px] text-amber-300/70 font-normal">Barn &amp; voksne sammen</div>
-                        </div>
+                        <div>{ts.familyQuizLabel}</div>
                       </button>
                       <button
                         type="button"
@@ -2235,10 +2422,7 @@ export default function App() {
                         className="w-full px-3 py-2 rounded-xl text-left text-xs text-emerald-100 hover:bg-emerald-500/25 font-bold flex items-center gap-2.5 cursor-pointer"
                       >
                         <span className="text-base">🎄</span>
-                        <div>
-                          <div>JuleQuiz</div>
-                          <div className="text-[10px] text-emerald-300/70 font-normal">Juletre, mat &amp; tradisjoner</div>
-                        </div>
+                        <div>{ts.christmasQuizLabel}</div>
                       </button>
                       <button
                         type="button"
@@ -2250,10 +2434,7 @@ export default function App() {
                         className="w-full px-3 py-2 rounded-xl text-left text-xs text-amber-100 hover:bg-amber-500/25 font-bold flex items-center gap-2.5 cursor-pointer"
                       >
                         <span className="text-base">👵</span>
-                        <div>
-                          <div>Senior Grenland Quiz</div>
-                          <div className="text-[10px] text-amber-300/70 font-normal">Ungdomsminner &amp; lokalhistorie</div>
-                        </div>
+                        <div>{ts.seniorQuizLabel}</div>
                       </button>
                       <button
                         type="button"
@@ -2265,10 +2446,7 @@ export default function App() {
                         className="w-full px-3 py-2 rounded-xl text-left text-xs text-sky-100 hover:bg-sky-500/25 font-bold flex items-center gap-2.5 cursor-pointer"
                       >
                         <span className="text-base">🧩</span>
-                        <div>
-                          <div>Memory</div>
-                          <div className="text-[10px] text-sky-300/70 font-normal">30 kort (15 par) · Lagspill</div>
-                        </div>
+                        <div>{ts.memoryLabel}</div>
                       </button>
                       <div className="h-px bg-purple-400/25 my-1" />
                       <button
@@ -2280,7 +2458,7 @@ export default function App() {
                         className="w-full px-3 py-2 rounded-xl text-left text-xs text-cyan-200 hover:bg-cyan-500/20 font-bold flex items-center gap-2 cursor-pointer"
                       >
                         <span>🎲</span>
-                        <span>Velg blant alle 6 spillformer</span>
+                        <span>{ui.gameMenuBtn}</span>
                       </button>
                     </div>
                   )}
@@ -2294,13 +2472,13 @@ export default function App() {
                   const m = sounds.toggleMute();
                   setIsMuted(m);
                 }}
-                aria-label={isMuted ? 'Unmute' : 'Mute'}
+                aria-label={isMuted ? ui.unmuteSound : ui.muteSound}
                 className="p-1.5 rounded-lg bg-amber-950/60 border border-amber-500/30 hover:border-amber-400 text-amber-300 hover:text-amber-100 cursor-pointer"
               >
                 {isMuted ? '🔇' : '🔊'}
               </button>
 
-              {/* Consolidated Tools Menu in Active Game (prevents header overflow on right) */}
+              {/* Consolidated Tools Menu in Active Game */}
               <div className="relative" ref={playToolsRef}>
                 <button
                   type="button"
@@ -2315,10 +2493,10 @@ export default function App() {
                       ? 'bg-amber-400 text-slate-950 border-amber-300 font-black'
                       : 'bg-amber-950/70 border-amber-500/40 text-amber-200 hover:border-amber-400'
                   }`}
-                  title="Verktøy, mikser, dagsplan, utskrift og innstillinger"
+                  title={ts.toolsBtnTitle}
                 >
                   <span>⚙️</span>
-                  <span className="hidden sm:inline">Verktøy</span>
+                  <span className="hidden sm:inline">{ui.tools}</span>
                   <span className="text-[10px]">{isPlayToolsOpen ? '▲' : '▼'}</span>
                 </button>
 
@@ -2339,7 +2517,7 @@ export default function App() {
                         }}
                         className="w-full px-3 py-2 rounded-xl text-xs font-bold text-emerald-200 hover:bg-emerald-500/20 flex items-center justify-between cursor-pointer"
                       >
-                        <span>🔗 {copiedActiveShareLink ? '✓ Lenke kopiert!' : 'Del spillerside'}</span>
+                        <span>🔗 {copiedActiveShareLink ? `✓ ${ui.copiedLink}` : ui.copyLink}</span>
                       </button>
                     )}
 
@@ -2369,7 +2547,7 @@ export default function App() {
                     >
                       <span>🎯 {t('daily_quests')}</span>
                       {dailyQuests.some((q) => q.isCompleted && !q.isClaimed) && (
-                        <span className="text-[10px] font-black text-emerald-300">Ny!</span>
+                        <span className="text-[10px] font-black text-emerald-300">✨</span>
                       )}
                     </button>
 
@@ -2396,7 +2574,7 @@ export default function App() {
                       className="w-full px-3 py-2 rounded-xl text-xs font-bold text-amber-200 hover:bg-amber-500/20 flex items-center gap-2 cursor-pointer"
                     >
                       <span>🖨️</span>
-                      <span>Skriv ut bingokort</span>
+                      <span>{t('print_cards')}</span>
                     </button>
 
                     <button
@@ -2408,7 +2586,7 @@ export default function App() {
                       }}
                       className="w-full px-3 py-2 rounded-xl text-xs font-bold text-amber-200 hover:bg-amber-500/20 flex items-center justify-between cursor-pointer"
                     >
-                      <span>👥 Venner & Nivå</span>
+                      <span>👥 {ts.participants}</span>
                       <span className="font-mono text-[11px] text-amber-300">Lvl {currentLevel.level}</span>
                     </button>
 
@@ -2422,7 +2600,7 @@ export default function App() {
                       className="w-full px-3 py-2 rounded-xl text-xs font-bold text-amber-200 hover:bg-amber-500/20 flex items-center gap-2 cursor-pointer"
                     >
                       <span>💬</span>
-                      <span>Rapporter problem</span>
+                      <span>{ts.report}</span>
                     </button>
 
                     {!isOwnerActive && !isRemoteParticipant && (
@@ -2434,7 +2612,7 @@ export default function App() {
                         }}
                         className="w-full px-3 py-2 rounded-xl text-xs font-black text-amber-300 hover:bg-amber-500/20 flex items-center justify-between cursor-pointer"
                       >
-                        <span>💳 Spilletid & Betaling</span>
+                        <span>💳 {ts.activePlaytimeLabel}</span>
                         <span className="font-mono text-[11px]">{sessionRemaining}</span>
                       </button>
                     )}
@@ -2450,7 +2628,7 @@ export default function App() {
                         className="w-full px-3 py-2 rounded-xl text-xs font-black text-amber-950 bg-amber-400 hover:bg-amber-300 flex items-center gap-2 cursor-pointer"
                       >
                         <span>👑</span>
-                        <span>Eierpanel (∞ Ubegrenset)</span>
+                        <span>{ts.ownerPanel} ({ts.unlimitedOwner})</span>
                       </button>
                     )}
 
@@ -2464,8 +2642,7 @@ export default function App() {
                         }}
                         className="w-full px-3 py-2 rounded-xl text-xs font-bold text-purple-200 hover:bg-purple-500/20 flex items-center justify-between cursor-pointer border-t border-white/10 mt-1 pt-2"
                       >
-                        <span>{authUser.isAuthenticated ? `${authUser.avatar} ${authUser.name}` : '🔑 Logg inn'}</span>
-                        <span className="text-[10px] text-purple-300">Profil</span>
+                        <span>{authUser.isAuthenticated ? `${authUser.avatar} ${authUser.name}` : `🔑 ${ts.loginAndPayBtn}`}</span>
                       </button>
                     )}
                   </div>
@@ -2478,7 +2655,7 @@ export default function App() {
                   setScreen('PAUSED');
                 }}
                 className="px-2.5 py-1.5 rounded-lg bg-amber-500/20 border border-amber-400/70 hover:bg-amber-500/35 text-amber-200 text-xs font-bold transition-all shadow cursor-pointer flex items-center gap-1 active:scale-95 whitespace-nowrap"
-                title="Pause spillet og frys spilletiden"
+                title={ui.pauseTitle}
               >
                 <span>⏸️</span>
                 <span className="hidden sm:inline">Pause</span>
@@ -2486,23 +2663,22 @@ export default function App() {
             </div>
           </header>
 
-          {/* Main Playfield: Responsive for Mobile, Desktop, TV and Storskjerm */}
+          {/* Main Playfield */}
           <main className={`relative z-10 flex-1 flex flex-col items-center justify-start my-1 ${playContainerWidth} mx-auto w-full`}>
-            {/* Storskjerm / TV Notice Banner if in big_screen mode and modal was closed */}
+            {/* Storskjerm / TV Notice Banner */}
             {screenDevice === 'big_screen' && !isAudienceOpen && (
               <div className="w-full mb-3 p-3 rounded-2xl bg-gradient-to-r from-rose-950/80 via-amber-950/80 to-emerald-950/80 border border-amber-400/60 shadow-xl flex flex-wrap items-center justify-between gap-3">
                 <div className="flex items-center gap-2.5">
                   <span className="text-2xl">📺</span>
                   <div>
-                    <div className="text-xs sm:text-sm font-black text-amber-200">TV & Prosjektor-oppløsning aktiv</div>
-                    <div className="text-xs text-amber-300/80">Utnytter hele bredden for forsamling — klikk for ren publikumsvisning uten vertsknapper</div>
+                    <div className="text-xs sm:text-sm font-black text-amber-200">{ui.tvProjector}</div>
                   </div>
                 </div>
                 <button
                   onClick={handleOpenAudience}
                   className="px-4 py-2 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-xs shadow cursor-pointer whitespace-nowrap"
                 >
-                  Åpne Publikums-Storskjerm ➔
+                  {ui.openBigScreenBtn} ➔
                 </button>
               </div>
             )}
@@ -2513,27 +2689,27 @@ export default function App() {
                 <div className="w-full p-2.5 sm:p-3 rounded-2xl bg-[#140d07]/95 border border-amber-400/35 shadow-xl space-y-2">
                   <div className="flex flex-wrap items-center justify-between gap-1.5">
                     <span className="text-[11px] font-heading font-black uppercase tracking-wider text-amber-300">
-                      🎯 Milepæler
+                      🎯 {ui.remoteMilestonesStatus}
                     </span>
                     <div className="flex flex-wrap items-center gap-1.5">
                       {[
                         {
                           id: 'line1' as const,
-                          label: '1. rekke',
+                          label: ui.milestoneLine1,
                           done: claimedMilestones.includes('line1'),
                           ready: completedLinesCount >= 1 && !claimedMilestones.includes('line1'),
                           progress: `${Math.min(completedLinesCount, 1)}/1`,
                         },
                         {
                           id: 'line3' as const,
-                          label: '3. rekker',
+                          label: ui.milestoneLine3,
                           done: claimedMilestones.includes('line3'),
                           ready: completedLinesCount >= 3 && !claimedMilestones.includes('line3'),
                           progress: `${Math.min(completedLinesCount, 3)}/3`,
                         },
                         {
                           id: 'fullbrett' as const,
-                          label: 'Full brett',
+                          label: ui.milestoneFullbrett,
                           done: claimedMilestones.includes('fullbrett') || activePlayer.hasBingo,
                           ready: Boolean(activeCardWinEval?.isFullHouse) && !claimedMilestones.includes('fullbrett'),
                           progress: activeCardWinEval?.isFullHouse ? '25/25' : `${completedLinesCount}/12`,
@@ -2566,10 +2742,10 @@ export default function App() {
                   <div className="flex items-center justify-between gap-2 pt-1.5 border-t border-amber-500/20">
                     <span className="text-[10px] text-amber-200/70 leading-tight">
                       {roomClaimedMilestones.includes('line3') && !roomClaimedMilestones.includes('fullbrett')
-                        ? '1. og 3. rekke er ropt · Fullfør fullt brett for neste bingo'
+                        ? ui.continuesToFullbrett
                         : roomClaimedMilestones.includes('line1') && !roomClaimedMilestones.includes('line3')
-                        ? '1. rekke er allerede ropt · Fullfør 3. rekker for neste bingo'
-                        : 'Vannrett, loddrett eller kryssende · Bekreft trukne tall fysisk'}
+                        ? ui.continuesToLine3
+                        : ui.physicalConfirmHint}
                     </span>
                     <button
                       type="button"
@@ -2580,25 +2756,17 @@ export default function App() {
                           ? 'bg-gradient-to-r from-amber-400 via-rose-500 to-amber-500 hover:brightness-110 text-white shadow-xl ring-2 ring-amber-200 cursor-pointer active:scale-95 animate-pulse'
                           : 'bg-white/5 border border-amber-500/25 text-amber-200/45 cursor-not-allowed'
                       }`}
-                      title={
-                        eligibleBingoClaim
-                          ? `Trykk fysisk for å rope ${eligibleBingoClaim.pattern}!`
-                          : roomClaimedMilestones.includes('line3')
-                          ? 'Låst — 3. rekker er allerede ropt. Fullfør fullt brett!'
-                          : roomClaimedMilestones.includes('line1')
-                          ? 'Låst — 1. rekke er allerede ropt. Fullfør 3. rekker!'
-                          : 'Låst til 1. rekke, 3. rekker eller Full brett er bekreftet med trukne tall/ord'
-                      }
+                      title={eligibleBingoClaim ? eligibleBingoClaim.label : ui.noEligibleLineYet}
                     >
                       <span>{eligibleBingoClaim ? '📣' : '🔒'}</span>
                       <span>
                         {eligibleBingoClaim
                           ? eligibleBingoClaim.label
                           : roomClaimedMilestones.includes('line3')
-                          ? 'Låst (Fyll fullt brett)'
+                          ? `${ui.pressBingoBtn} (${ui.milestoneFullbrett})`
                           : roomClaimedMilestones.includes('line1')
-                          ? 'Låst (Fyll 3. rekker)'
-                          : 'Rop BINGO! (Fyll rekke)'}
+                          ? `${ui.pressBingoBtn} (${ui.milestoneLine3})`
+                          : ui.pressBingoBtn}
                       </span>
                     </button>
                   </div>
@@ -2617,9 +2785,9 @@ export default function App() {
                         type="button"
                         onClick={() => setBingoProgressionBanner(null)}
                         className="text-xs font-black px-2 py-0.5 rounded bg-black/30 hover:bg-black/50 cursor-pointer shrink-0"
-                        aria-label="Lukk bingovarsel"
+                        aria-label={ui.ok}
                       >
-                        OK
+                        {ui.ok}
                       </button>
                     </div>
                   )}
@@ -2637,7 +2805,7 @@ export default function App() {
                         type="button"
                         onClick={() => setCardActionNotice(null)}
                         className="text-xs font-black px-1.5 py-0.5 rounded hover:bg-white/10 cursor-pointer shrink-0"
-                        aria-label="Lukk melding"
+                        aria-label={ui.close}
                       >
                         ✕
                       </button>
@@ -2652,18 +2820,18 @@ export default function App() {
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="text-lg">📊</span>
                       <h3 className="font-heading font-black text-sm text-amber-200">
-                        Arrangørens Stillingsliste & Deltakere
+                        {ui.audienceLeaderboardTitle}
                       </h3>
                       <span className="px-2 py-0.5 rounded-full bg-amber-500/20 border border-amber-400/40 text-amber-200 text-[10px] font-black">
-                        Runde {bingoRoundNumber}
+                        {ui.round} {bingoRoundNumber}
                       </span>
                       {remoteBingo.getHostCode() && (
                         <span className="px-2.5 py-0.5 rounded-lg bg-cyan-950 border border-cyan-400/60 text-cyan-100 font-mono font-black text-xs tracking-widest">
-                          📡 Romkode: {remoteBingo.getHostCode()}
+                          📡 {ui.code}: {remoteBingo.getHostCode()}
                         </span>
                       )}
                       <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-400/40 text-emerald-200 text-[10px] font-black">
-                        👥 {players.length + remoteParticipantsList.length} spiller sammen ({players.length} brett · {remoteParticipantsList.length} på mobil)
+                        👥 {players.length + remoteParticipantsList.length} {ui.players}
                       </span>
                     </div>
 
@@ -2676,9 +2844,9 @@ export default function App() {
                             handleStartNewBingoRound();
                           }}
                           className="px-2.5 py-1.5 rounded-xl bg-amber-500/25 hover:bg-amber-500/40 border border-amber-400/50 text-amber-100 font-black text-[11px] cursor-pointer shadow"
-                          title="Start ny runde for hele rommet (kun arrangør styrer)"
+                          title={ui.newRoundBtn}
                         >
-                          🔄 Ny runde nå
+                          🔄 {ui.newRoundBtn}
                         </button>
                       )}
                       {remoteBingo.getHostCode() && (
@@ -2693,7 +2861,7 @@ export default function App() {
                             }}
                             className="px-2.5 py-1.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-[11px] cursor-pointer shadow"
                           >
-                            {copiedActiveRoomCode ? '✓ Kode kopiert!' : '📋 Kopier romkode'}
+                            {copiedActiveRoomCode ? `✓ ${ui.copied}` : `📋 ${ui.copyCode}`}
                           </button>
                           <button
                             type="button"
@@ -2707,7 +2875,7 @@ export default function App() {
                             }}
                             className="px-2.5 py-1.5 rounded-xl bg-emerald-500/25 hover:bg-emerald-500/40 border border-emerald-400/50 text-emerald-100 font-bold text-[11px] cursor-pointer shadow"
                           >
-                            {copiedActiveShareLink ? '✓ Spillerlenke kopiert!' : '🔗 Del spillerside'}
+                            {copiedActiveShareLink ? `✓ ${ui.copiedLink}` : `🔗 ${ui.copyLink}`}
                           </button>
                         </>
                       )}
@@ -2719,16 +2887,16 @@ export default function App() {
                         }}
                         className="px-2.5 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 border border-white/15 text-amber-200 font-bold text-[11px] cursor-pointer"
                       >
-                        💬 Meldinger & Deltakerkontroll
+                        💬 {ui.openRemoteBtn}
                       </button>
                     </div>
                   </div>
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    {/* Ranked Standings of ALL Players in Room (local + remote) */}
+                    {/* Ranked Standings of ALL Players in Room */}
                     <div className="p-3 rounded-xl bg-black/45 border border-white/10 space-y-2">
                       <div className="text-[11px] font-black uppercase tracking-wider text-amber-300">
-                        🏆 Stillingsliste — Alle som spiller sammen ({players.length + remoteParticipantsList.length})
+                        🏆 {ui.audienceLeaderboardTitle} ({players.length + remoteParticipantsList.length})
                       </div>
                       <div className="space-y-1.5 max-h-44 overflow-y-auto pr-1">
                         {[
@@ -2776,12 +2944,12 @@ export default function App() {
                                 <span className="font-bold truncate">{p.name}</span>
                                 {p.isRemote && (
                                   <span className="text-[10px] px-1.5 py-0.2 rounded bg-cyan-950/90 border border-cyan-400/40 text-cyan-200 font-bold shrink-0">
-                                    📱 Mobil
+                                    📱 {ui.mobile}
                                   </span>
                                 )}
                               </div>
                               <span className="font-mono font-black text-[11px] text-amber-300 shrink-0">
-                                {p.hasBingo ? 'FULLBRETT!' : `${p.linesCompleted} ${p.linesCompleted === 1 ? 'linje' : 'linjer'}`}
+                                {p.hasBingo ? `${ui.milestoneFullbrett}!` : `${p.linesCompleted} ${ui.linesCountLabel}`}
                               </span>
                             </div>
                           ))}
@@ -2791,11 +2959,11 @@ export default function App() {
                     {/* Remote Participants Joined with Room Code */}
                     <div className="p-3 rounded-xl bg-black/45 border border-white/10 space-y-2">
                       <div className="text-[11px] font-black uppercase tracking-wider text-cyan-300">
-                        📱 Deltakere tilkoblet med koden ({remoteParticipantsList.length})
+                        📱 {ui.remoteParticipantsTitle} ({remoteParticipantsList.length})
                       </div>
                       {remoteParticipantsList.length === 0 ? (
                         <div className="text-xs text-slate-400 py-2">
-                          Ingen eksterne mobildeltakere koblet til ennå. Del romkoden eller trykk «Del spillerside».
+                          {ui.remoteNoParticipants}
                         </div>
                       ) : (
                         <div className="flex flex-wrap gap-1.5 max-h-44 overflow-y-auto">
@@ -2811,10 +2979,10 @@ export default function App() {
                                 onClick={() => {
                                   sounds.playClick();
                                   remoteBingo.kickParticipant(rp.id, rp.name);
-                                  ownerControl.banParticipant(rp.name, 'Utestengt fra spillrom (10 min)');
+                                  ownerControl.banParticipant(rp.name, ui.bannedDesc);
                                 }}
                                 className="ml-1 text-rose-300 hover:text-rose-100 font-black cursor-pointer"
-                                title={`Utesteng ${rp.name} for forstyrrende adferd`}
+                                title={rp.name}
                               >
                                 ✕
                               </button>
@@ -2828,11 +2996,11 @@ export default function App() {
                   {/* Live Organizer Feed: Who joined & Verified Bingo Claims */}
                   <div className="p-3 rounded-xl bg-emerald-950/25 border border-emerald-400/35 space-y-2">
                     <div className="flex items-center justify-between gap-2 text-[11px] font-black uppercase tracking-wider text-emerald-300">
-                      <span>🔔 Varsler til arrangør — Hvem som ble med &amp; Bingorop ({hostNotificationsList.length})</span>
+                      <span>🔔 {ui.liveActivityTitle} ({hostNotificationsList.length})</span>
                     </div>
                     {hostNotificationsList.length === 0 ? (
                       <div className="text-xs text-slate-400">
-                        Ingen hendelser ennå. Du får automatisk varsel her så snart noen blir med med koden eller trykker BINGO.
+                        {ui.noUnreadAlerts}
                       </div>
                     ) : (
                       <div className="space-y-1 max-h-32 overflow-y-auto pr-1">
@@ -2918,7 +3086,7 @@ export default function App() {
                               : 'text-amber-200/70 hover:text-amber-100'
                           }`}
                         >
-                          Card #{cIdx + 1}
+                          {ui.cardNumberPrefix}{cIdx + 1}
                         </button>
                       ))}
                     </div>
@@ -3011,13 +3179,13 @@ export default function App() {
                           onPause={() => setScreen('PAUSED')}
                           isPaused={false}
                           canDraw={canHostDrawBalls}
-                          readOnlyMessage="🔒 Kun arrangør styrer kuletrekningen"
+                          readOnlyMessage={`🔒 ${ui.hostControlsNote}`}
                           compactSidebar={true}
                         />
                       </div>
                     )}
 
-                    {/* Mobile Milepæler & Rop BINGO! (rett over brettet, uten ekstra trekk-rad og uten å flyte over kortet) */}
+                    {/* Mobile Milepæler & Rop BINGO! */}
                     {milestonePanel}
 
                     {/* Mobile Player & Card Switchers + Board */}
@@ -3026,7 +3194,7 @@ export default function App() {
                     {/* Mobile Standings */}
                     {standingsSection}
 
-                    {/* Compact Mobile Bottom Quick Dock (<= 48px — viser alltid siste kule uten å dekke bingokortet) */}
+                    {/* Compact Mobile Bottom Quick Dock */}
                     <div className="fixed bottom-2 left-1/2 -translate-x-1/2 z-40 w-[96%] max-w-md px-2 py-1.5 rounded-2xl bg-black/95 backdrop-blur-md border border-amber-400/45 shadow-2xl flex items-center justify-between gap-1.5">
                       {/* Compact Live Ball Readout inside bottom dock */}
                       <div
@@ -3034,13 +3202,13 @@ export default function App() {
                         title={
                           calledBalls.length > 0
                             ? `${calledBalls[calledBalls.length - 1].letter}-${calledBalls[calledBalls.length - 1].number}: ${calledBalls[calledBalls.length - 1].affirmation}`
-                            : 'Ingen kule trukket ennå'
+                            : ui.readyToRoll
                         }
                       >
                         <span className="font-mono font-black text-xs text-amber-300 shrink-0 tabular-nums">
                           {calledBalls.length > 0
                             ? `${calledBalls[calledBalls.length - 1].letter}-${calledBalls[calledBalls.length - 1].number}`
-                            : 'Klar'}
+                            : '•'}
                         </span>
                         {calledBalls.length > 0 && (
                           <span className="text-[10px] text-amber-100/85 truncate max-w-[70px]">
@@ -3055,7 +3223,7 @@ export default function App() {
                             type="button"
                             onClick={handleRefillDrumKeepCards}
                             className="py-1.5 px-2.5 bg-gradient-to-r from-emerald-400 to-teal-400 text-slate-950 font-black text-xs rounded-xl shadow flex items-center justify-center gap-1 active:scale-95 cursor-pointer shrink-0"
-                            title="Bland alle 75 kuler på nytt uten å nullstille brett"
+                            title={ui.refillBtn}
                           >
                             <span>🔄</span>
                           </button>
@@ -3069,9 +3237,9 @@ export default function App() {
                               }
                             }}
                             className="py-1.5 px-2.5 bg-gradient-to-r from-amber-400 to-amber-500 text-slate-950 font-black text-xs rounded-xl shadow flex items-center justify-center gap-1 active:scale-95 cursor-pointer shrink-0"
-                            title="Trekk neste kule"
+                            title={ui.drawNextBtn}
                           >
-                            <span>🎲 Trekk</span>
+                            <span>🎲 {ui.drawNextBtn}</span>
                           </button>
                         )
                       )}
@@ -3085,24 +3253,16 @@ export default function App() {
                             ? 'bg-gradient-to-r from-amber-400 via-rose-500 to-amber-500 text-white active:scale-95 cursor-pointer ring-2 ring-amber-200 animate-pulse'
                             : 'bg-white/5 border border-amber-500/25 text-amber-200/45 cursor-not-allowed'
                         }`}
-                        title={
-                          eligibleBingoClaim
-                            ? `Trykk for å rope ${eligibleBingoClaim.pattern}!`
-                            : roomClaimedMilestones.includes('line3')
-                            ? 'Låst til fullt brett er fullført'
-                            : roomClaimedMilestones.includes('line1')
-                            ? 'Låst til 3. rekker er fullført'
-                            : 'Låst til 1. rekke, 3. rekker eller Full brett er fylt og bekreftet'
-                        }
+                        title={eligibleBingoClaim ? eligibleBingoClaim.label : ui.noEligibleLineYet}
                       >
                         <span className="truncate">
                           {eligibleBingoClaim
                             ? eligibleBingoClaim.label
                             : roomClaimedMilestones.includes('line3')
-                            ? '🔒 Fullt brett'
+                            ? `🔒 ${ui.milestoneFullbrett}`
                             : roomClaimedMilestones.includes('line1')
-                            ? '🔒 3. rekker'
-                            : '🔒 BINGO'}
+                            ? `🔒 ${ui.milestoneLine3}`
+                            : `🔒 ${ui.pressBingoBtn}`}
                         </span>
                       </button>
 
@@ -3114,7 +3274,7 @@ export default function App() {
                             ? 'bg-amber-400 text-slate-950 border-amber-300'
                             : 'bg-black/60 border-amber-500/35 text-amber-200'
                         }`}
-                        title={mobileShowBlender ? 'Skjul 3D trommel' : 'Vis 3D trommel'}
+                        title={ui.drumTitle}
                       >
                         🎰
                       </button>
@@ -3126,7 +3286,7 @@ export default function App() {
                           setScreen('PAUSED');
                         }}
                         className="py-1.5 px-2 bg-amber-500/20 border border-amber-400/60 hover:bg-amber-500/30 text-amber-200 font-bold text-xs rounded-xl shadow cursor-pointer flex items-center active:scale-95 shrink-0"
-                        title="Pause spillet og frys spilletiden"
+                        title={ui.pauseTitle}
                       >
                         ⏸️
                       </button>
@@ -3154,7 +3314,7 @@ export default function App() {
                         onPause={() => setScreen('PAUSED')}
                         isPaused={false}
                         canDraw={canHostDrawBalls}
-                        readOnlyMessage="🔒 Kun arrangør styrer kuletrekningen"
+                        readOnlyMessage={`🔒 ${ui.hostControlsNote}`}
                         compactSidebar={false}
                         tumblerSize={screenDevice === 'big_screen' ? 'tv' : 'large'}
                         layout="row"
@@ -3165,10 +3325,9 @@ export default function App() {
                 );
               }
 
-              // DESKTOP / PC / TV SPLIT VIEW: Sticky Floating Left Trommel & Milepæler Rail + Right Bingo Cards & Standings
+              // DESKTOP / PC / TV SPLIT VIEW
               return (
                 <div className="w-full flex flex-col md:flex-row items-start gap-4 lg:gap-6">
-                  {/* Left Floating Rail: Stays pinned on the left side of the Bingo Card while scrolling up/down */}
                   <aside
                     className={`w-full shrink-0 md:sticky md:top-3 self-start md:max-h-[calc(100vh-1.5rem)] md:overflow-y-auto no-scrollbar space-y-2.5 z-20 ${
                       screenDevice === 'big_screen'
@@ -3190,7 +3349,7 @@ export default function App() {
                       onPause={() => setScreen('PAUSED')}
                       isPaused={false}
                       canDraw={canHostDrawBalls}
-                      readOnlyMessage="🔒 Kun arrangør styrer kuletrekningen"
+                      readOnlyMessage={`🔒 ${ui.hostControlsNote}`}
                       compactSidebar={false}
                       tumblerSize={screenDevice === 'big_screen' ? 'tv' : 'large'}
                       layout="stacked"
@@ -3216,10 +3375,10 @@ export default function App() {
           {/* Bottom Control Bar */}
           <footer className={`relative z-20 flex flex-wrap items-center justify-between gap-2 w-full ${playContainerWidth} mx-auto pt-3 text-2xs text-amber-300/60 font-medium`}>
             <div className="flex items-center gap-2">
-              <span>{displayMode === 'numbers' ? 'Numbered 1-75 Card' : 'Joy Connection Card'}</span>
+              <span>{displayMode === 'numbers' ? ui.numberedCardLabel : ui.joyCardLabel}</span>
               <span>·</span>
               <span>
-                {activePlayer ? `${activePlayer.cards.length} Cards in Play` : '1 Card in Play'}
+                {activePlayer ? `${activePlayer.cards.length} ${ui.cardsInPlayLabel}` : `1 ${ui.cardsInPlayLabel}`}
               </span>
             </div>
 
@@ -3231,7 +3390,7 @@ export default function App() {
                 }}
                 className="px-3 py-1 rounded-lg bg-amber-950/60 border border-amber-500/30 text-amber-300 hover:text-amber-100 cursor-pointer"
               >
-                Share Progress
+                {ui.shareProgressBtn}
               </button>
             </div>
           </footer>
@@ -3244,16 +3403,16 @@ export default function App() {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-in fade-in duration-150 overflow-y-auto">
           <div className="relative w-full max-w-md bg-[#1a1209] border-2 border-amber-500/50 rounded-3xl p-6 text-center text-amber-50 shadow-2xl space-y-3">
             <h3 className="font-display text-2xl font-black text-amber-200">
-              ⏸️ Spillet er Pauset
+              ⏸️ {ui.pauseTitle}
             </h3>
             
             {/* Paused timer indicator */}
             <div className="p-2.5 rounded-xl bg-amber-500/15 border border-amber-500/30 text-2xs text-amber-200 flex items-center justify-center gap-2 font-mono">
               <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping" />
               {isOwnerActive ? (
-                <span>Eiermodus aktiv: <strong className="text-emerald-300">∞ Ubegrenset (Eier)</strong></span>
+                <strong className="text-emerald-300">∞ {ts.unlimitedOwner}</strong>
               ) : (
-                <span>Spilletiden er fryst på: <strong className="text-amber-100">{sessionRemaining}</strong></span>
+                <span>{ui.pauseDesc} <strong className="text-amber-100">{sessionRemaining}</strong></span>
               )}
             </div>
 
@@ -3267,7 +3426,7 @@ export default function App() {
                 className="w-full py-2.5 bg-gradient-to-r from-amber-400 via-amber-300 to-amber-500 text-slate-950 font-heading font-black text-xs rounded-xl shadow-lg cursor-pointer flex items-center justify-center gap-1.5"
               >
                 <span>👑</span>
-                <span>Åpne Eierpanel</span>
+                <span>{ts.ownerPanel}</span>
               </button>
             )}
 
@@ -3289,16 +3448,16 @@ export default function App() {
                 <span>{t('resume_game')}</span>
               </button>
 
-              {/* Reset Game button: Clears session progress and returns to Title Screen */}
+              {/* Reset Game button */}
               <button
                 onClick={handleResetGame}
                 className="w-full py-3 bg-gradient-to-r from-rose-900/80 via-rose-800/80 to-amber-900/80 hover:from-rose-800 hover:to-amber-800 border-2 border-rose-500/50 hover:border-rose-400 text-rose-100 font-heading font-black text-xs sm:text-sm rounded-xl shadow-xl transition-all active:scale-95 cursor-pointer flex items-center justify-center gap-2 group"
-                title="Clears current bingo session progress and returns to Title Screen to start fresh"
+                title={ui.startFreshBtn}
               >
                 <svg className="w-4 h-4 text-rose-300 group-hover:rotate-180 transition-transform duration-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                 </svg>
-                <span>{t('reset_game')} (Start Fresh)</span>
+                <span>{t('reset_game')} · {ui.startFreshBtn}</span>
               </button>
 
               <button
@@ -3321,7 +3480,7 @@ export default function App() {
                 }}
                 className="w-full py-2 text-xs text-amber-400/70 hover:text-amber-200 cursor-pointer transition-colors"
               >
-                Quit to Title Screen (Keep Progress)
+                {ui.quitKeepBtn}
               </button>
             </div>
           </div>
@@ -3733,7 +3892,11 @@ export default function App() {
       {/* Avstandsbingo Rop BINGO feiringsmodal */}
       <RemoteBingoClaimModal
         claim={remoteBingoClaim}
-        onClose={() => setRemoteBingoClaim(null)}
+        winnerTask={activeClaimWinnerTask}
+        onClose={() => {
+          setRemoteBingoClaim(null);
+          setActiveClaimWinnerTask(null);
+        }}
         isHost={!remoteBingo.getIsRemotePlayer()}
         onStartNewRoundNow={handleStartNewBingoRound}
       />
@@ -3763,12 +3926,12 @@ export default function App() {
 
       {/* Quest Completed Toast Banner */}
       {questToast && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 animate-bounce pointer-events-none">
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[75] animate-bounce pointer-events-none">
           <div className="flex items-center gap-3 px-5 py-3 rounded-2xl bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 font-bold shadow-2xl border-2 border-amber-200">
             <span className="text-2xl">{questToast.icon}</span>
             <div>
-              <div className="text-[10px] uppercase tracking-wider font-black text-amber-950">Daily Quest Completed!</div>
-              <div className="text-sm font-extrabold">{questToast.title} (+{questToast.rewardPoints} pts)</div>
+              <div className="text-[10px] uppercase tracking-wider font-black text-amber-950">{ui.questDoneBadge}</div>
+              <div className="text-sm font-extrabold">{questToast.title} (+{questToast.rewardPoints})</div>
             </div>
           </div>
         </div>
@@ -3783,17 +3946,17 @@ export default function App() {
             </div>
             <div>
               <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-400/40 text-xs font-black">
-                EKTE STRIPE-BETALING FULLFØRT
+                STRIPE
               </span>
               <h3 className="font-heading font-black text-xl text-emerald-300 mt-2">
-                Betaling Vellykket & Godkjent!
+                {ts.paidPackageActiveTitle}
               </h3>
               <p className="text-xs text-emerald-100/90 mt-1 leading-relaxed">
-                Beløpet på <strong className="text-white font-mono">{stripePaymentNotice.amount} NOK</strong> ble godkjent og faktisk trukket via Stripe. Pengene er overført til din saldo, og spilletiden (<strong className="text-amber-300">{stripePaymentNotice.label}</strong>) er umiddelbart aktivert!
+                <strong className="text-white font-mono">{stripePaymentNotice.amount} NOK</strong> · <strong className="text-amber-300">{stripePaymentNotice.label}</strong>
               </p>
             </div>
             <div className="p-3 rounded-2xl bg-black/60 border border-emerald-500/30 text-2xs font-mono text-emerald-300/80">
-              Transaksjonsreferanse: {stripePaymentNotice.reference}
+              Ref: {stripePaymentNotice.reference}
             </div>
             <button
               type="button"
@@ -3804,7 +3967,7 @@ export default function App() {
               }}
               className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-emerald-400 to-teal-400 hover:brightness-110 active:scale-98 text-slate-950 font-black text-sm cursor-pointer shadow-lg transition-all"
             >
-              Velg spillform (Storskjerm / Avstandsbingo) ➔
+              {ui.gameMenuBtn} ➔
             </button>
           </div>
         </div>
@@ -3818,13 +3981,13 @@ export default function App() {
               🛡️
             </div>
             <h2 className="font-heading text-xl font-bold text-rose-300 mb-2">
-              Social Wellbeing Notice
+              {ui.bannedTitle}
             </h2>
             <p className="text-sm text-amber-100/90 leading-relaxed mb-4">
               {bannedNotice}
             </p>
             <p className="text-xs text-amber-300/60 mb-6">
-              This application is built for uplifting human connection, mutual respect, and joyful play. Disruptive behavior is not permitted.
+              {ui.wellbeingDesc}
             </p>
             <button
               onClick={() => {
@@ -3833,7 +3996,7 @@ export default function App() {
               }}
               className="w-full py-3 bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 font-bold rounded-xl text-sm cursor-pointer shadow-lg"
             >
-              Return to Title Screen
+              {ui.backToStart}
             </button>
           </div>
         </div>

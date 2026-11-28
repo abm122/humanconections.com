@@ -13,12 +13,522 @@ import { MUSIC_BINGO_SONGS } from '../data/musicBingoSongs';
 import { CalledBall } from '../types/bingo';
 import { BingoTvState, remoteBingo } from '../services/remoteBingo';
 import { firebasePersistence } from '../services/firebasePersistence';
+import { SupportedLanguage, useTranslation } from '../services/i18n';
+import { formatMilestoneLabel, getBingoUiTexts } from '../services/bingoUiI18n';
 import {
   DEFAULT_QUIZ_TEAMS,
   QuizRoomSnapshot,
   QuizTeamColor,
   quizService,
 } from '../services/quizService';
+
+interface TvExtraTexts {
+  invalidCodeErr: string;
+  noActiveStreamErr: string;
+  serverErr: string;
+  connectSubtitle: string;
+  hostCodeInputLabel: string;
+  hiddenInputNote: string;
+  connectingTvBtn: string;
+  startTvBtn: string;
+  backNormalBtn: string;
+  audienceOnlyBadge: string;
+  playersTogetherSuffix: string;
+  participantCodeLabel: string;
+  bingoTvBtn: string;
+  quizTvBtn: string;
+  lastBallLabel: string;
+  of75Drawn: string;
+  waitingFirstDraw: string;
+  prevBallsLabel: string;
+  masterBoardTitle: string;
+  drawnLabel: string;
+  remainingLabel: string;
+  waitingPlayersConnect: string;
+  claimedTag: string;
+  tvHeaderAdultQuiz: string;
+  tvHeaderFamilyQuiz: string;
+  tvHeaderSeniorQuiz: string;
+  tvHeaderChristmasQuiz: string;
+  tvHeaderBingo: string;
+  quizMimeRoundPrefix: string;
+  quizReadyTeams: string;
+  quizQuestionWord: string;
+  quizOfWord: string;
+  quizTurnWord: string;
+  quizMimeSecretNote: string;
+  quizCategoryWord: string;
+  quizMimingNow: string;
+  quizSecretWordWas: string;
+  quizWelcomeSenior: string;
+  quizWelcomeDefault: string;
+  quizConnectCodePrefix: string;
+  quizHostControlsNote: string;
+  quizConnectedCountLabel: string;
+  quizMusicGuessBadge: string;
+  quizWriteAnswerBadge: string;
+  quizSongWasPrefix: string;
+  quizAudioQuestionBadge: string;
+  quizHintPrefix: string;
+  quizCorrectBadge: string;
+  quizAnswersHidden: string;
+  quizAnswersCountSuffix: string;
+  quizAnswerKey: string;
+  quizWordplayPrefix: string;
+  quizResultsTitle: string;
+  quizPointsSuffix: string;
+}
+
+const TV_EXTRA: Record<SupportedLanguage, TvExtraTexts> = {
+  nb: {
+    invalidCodeErr: 'Skriv inn en gyldig romkode (minst 3 tegn) fra arrangøren.',
+    noActiveStreamErr: 'Fant ingen aktiv sending for denne koden ennå. Arrangøren må først åpne spillet på sin enhet.',
+    serverErr: 'Kunne ikke kontakte serveren for TV-visning. Prøv igjen.',
+    connectSubtitle: 'Koble TV-en eller projektoren til arrangørens spill. Deltakerkoden er åpen for publikum på alle skjermer, mens fasiter og arrangørens private innlogging holdes skjult.',
+    hostCodeInputLabel: 'Arrangørens romkode for TV-oppkobling:',
+    hiddenInputNote: 'Skjult inntasting hindrer at publikum ser koden på projektoren mens du skriver den.',
+    connectingTvBtn: 'Kobler til TV-sending...',
+    startTvBtn: '📺 Start Storskjerm / TV-visning',
+    backNormalBtn: '⇦ Tilbake til vanlig visning',
+    audienceOnlyBadge: 'Kun publikumsskjerm',
+    playersTogetherSuffix: 'spillere sammen',
+    participantCodeLabel: 'Deltakerkode:',
+    bingoTvBtn: '🎱 Bingo TV',
+    quizTvBtn: '🎭 Quiz TV',
+    lastBallLabel: 'Siste kule',
+    of75Drawn: 'av 75 trukket',
+    waitingFirstDraw: '🎯 Klar for trekk! Venter på at arrangøren trekker første kule...',
+    prevBallsLabel: 'Forrige:',
+    masterBoardTitle: 'Master Tavle (1–75)',
+    drawnLabel: 'Trukket',
+    remainingLabel: 'Gjenstår',
+    waitingPlayersConnect: 'Venter på at deltakere kobler seg til med koden eller starter brett...',
+    claimedTag: 'Ropt',
+    tvHeaderAdultQuiz: 'QUIZ · STORSKJERM / TV',
+    tvHeaderFamilyQuiz: 'FAMILIEQUIZ · STORSKJERM / TV',
+    tvHeaderSeniorQuiz: 'SENIOR GRENLAND QUIZ · STORSKJERM / TV',
+    tvHeaderChristmasQuiz: 'JULEQUIZ · STORSKJERM / TV',
+    tvHeaderBingo: 'INJOY TOGETHER · STORSKJERM / TV',
+    quizMimeRoundPrefix: '🎭 Jule-Mimelek · Runde',
+    quizReadyTeams: 'Gjør lagene klare!',
+    quizQuestionWord: 'Spørsmål',
+    quizOfWord: 'av',
+    quizTurnWord: 'Tur:',
+    quizMimeSecretNote: 'Én spiller går til arrangøren og velger sitt hemmelige ord. Ordet vises aldri på Storskjermen før runden er ferdig!',
+    quizCategoryWord: 'Kategori:',
+    quizMimingNow: 'mimer nå!',
+    quizSecretWordWas: 'Hemmelig mimeord var:',
+    quizWelcomeSenior: 'Velkommen til Senior Grenland Quiz (Musikk & Lokalquiz)!',
+    quizWelcomeDefault: 'Velkommen til Quizen!',
+    quizConnectCodePrefix: 'Koble til med koden',
+    quizHostControlsNote: 'Arrangøren har åpnet quizrommet og styrer når første spørsmål og fasit deles til skjermen.',
+    quizConnectedCountLabel: 'Tilkoblede deltakere:',
+    quizMusicGuessBadge: '🎵 Musikk-gjetting (Lydklipp & Quiz)',
+    quizWriteAnswerBadge: '✍️ Skriv-svar',
+    quizSongWasPrefix: '🎶 Låten var:',
+    quizAudioQuestionBadge: '🎵 LYDSPØRSMÅL · Lytt til melodien & les spørsmålet under!',
+    quizHintPrefix: '💡 Hint:',
+    quizCorrectBadge: '✓ RIKTIG!',
+    quizAnswersHidden: 'Svarene er skjult til arrangøren deler fasiten!',
+    quizAnswersCountSuffix: 'svar mottatt så langt',
+    quizAnswerKey: '✓ FASIT:',
+    quizWordplayPrefix: '😄 Ordlek:',
+    quizResultsTitle: 'Resultattavle — Takk for kampen!',
+    quizPointsSuffix: 'poeng',
+  },
+  en: {
+    invalidCodeErr: 'Enter a valid room code (at least 3 characters) from the host.',
+    noActiveStreamErr: 'No active broadcast found for this code yet. The host must open the game first.',
+    serverErr: 'Could not reach the server for TV display. Please try again.',
+    connectSubtitle: 'Connect the TV or projector to the host game. Participant code can be shown to the audience while host secrets remain hidden.',
+    hostCodeInputLabel: 'Host room code for TV connection:',
+    hiddenInputNote: 'Hidden input prevents the audience from seeing the code on the projector while you type it.',
+    connectingTvBtn: 'Connecting to TV stream...',
+    startTvBtn: '📺 Start Big Screen / TV Mode',
+    backNormalBtn: '⇦ Back to normal view',
+    audienceOnlyBadge: 'Audience Display Only',
+    playersTogetherSuffix: 'players together',
+    participantCodeLabel: 'Join Code:',
+    bingoTvBtn: '🎱 Bingo TV',
+    quizTvBtn: '🎭 Quiz TV',
+    lastBallLabel: 'Latest Ball',
+    of75Drawn: 'of 75 drawn',
+    waitingFirstDraw: '🎯 Ready! Waiting for the host to draw the first ball...',
+    prevBallsLabel: 'Previous:',
+    masterBoardTitle: 'Master Flashboard (1–75)',
+    drawnLabel: 'Drawn',
+    remainingLabel: 'Remaining',
+    waitingPlayersConnect: 'Waiting for participants to join with the code or start cards...',
+    claimedTag: 'Claimed',
+    tvHeaderAdultQuiz: 'QUIZ · BIG SCREEN / TV',
+    tvHeaderFamilyQuiz: 'FAMILY QUIZ · BIG SCREEN / TV',
+    tvHeaderSeniorQuiz: 'SENIOR GRENLAND QUIZ · BIG SCREEN / TV',
+    tvHeaderChristmasQuiz: 'CHRISTMAS QUIZ · BIG SCREEN / TV',
+    tvHeaderBingo: 'INJOY TOGETHER · BIG SCREEN / TV',
+    quizMimeRoundPrefix: '🎭 Holiday Mime · Round',
+    quizReadyTeams: 'Get the teams ready!',
+    quizQuestionWord: 'Question',
+    quizOfWord: 'of',
+    quizTurnWord: 'Turn:',
+    quizMimeSecretNote: 'One player goes to the host to pick a secret word. It is never shown on the Big Screen until the round finishes!',
+    quizCategoryWord: 'Category:',
+    quizMimingNow: 'is miming now!',
+    quizSecretWordWas: 'Secret mime word was:',
+    quizWelcomeSenior: 'Welcome to Senior Grenland Quiz (Music & Local Quiz)!',
+    quizWelcomeDefault: 'Welcome to the Quiz!',
+    quizConnectCodePrefix: 'Join with code',
+    quizHostControlsNote: 'The host has opened the quiz room and controls when questions and answers appear.',
+    quizConnectedCountLabel: 'Connected participants:',
+    quizMusicGuessBadge: '🎵 Music Guessing (Audio Clip & Quiz)',
+    quizWriteAnswerBadge: '✍️ Write-in answer',
+    quizSongWasPrefix: '🎶 The song was:',
+    quizAudioQuestionBadge: '🎵 AUDIO QUESTION · Listen to the melody & read below!',
+    quizHintPrefix: '💡 Hint:',
+    quizCorrectBadge: '✓ CORRECT!',
+    quizAnswersHidden: 'Answers are hidden until the host reveals the solution!',
+    quizAnswersCountSuffix: 'answers received so far',
+    quizAnswerKey: '✓ ANSWER:',
+    quizWordplayPrefix: '😄 Wordplay:',
+    quizResultsTitle: 'Scoreboard — Thanks for playing!',
+    quizPointsSuffix: 'pts',
+  },
+  sv: {
+    invalidCodeErr: 'Ange en giltig rumskod (minst 3 tecken) från värden.',
+    noActiveStreamErr: 'Ingen aktiv sändning hittades för den här koden ännu.',
+    serverErr: 'Kunde inte kontakta servern för TV-visning. Försök igen.',
+    connectSubtitle: 'Anslut TV eller projektor till värdens spel. Deltagarkoden visas för publiken medan värdens kontroller förblir dolda.',
+    hostCodeInputLabel: 'Värdens rumskod för TV-anslutning:',
+    hiddenInputNote: 'Dold inmatning hindrar publiken från att se koden när du skriver den.',
+    connectingTvBtn: 'Ansluter till TV-sändning...',
+    startTvBtn: '📺 Starta Storbild / TV-visning',
+    backNormalBtn: '⇦ Tillbaka till vanlig vy',
+    audienceOnlyBadge: 'Endast publikskärm',
+    playersTogetherSuffix: 'spelare tillsammans',
+    participantCodeLabel: 'Deltagarkod:',
+    bingoTvBtn: '🎱 Bingo TV',
+    quizTvBtn: '🎭 Quiz TV',
+    lastBallLabel: 'Senaste kula',
+    of75Drawn: 'av 75 dragna',
+    waitingFirstDraw: '🎯 Redo! Väntar på att värden drar första kulan...',
+    prevBallsLabel: 'Föregående:',
+    masterBoardTitle: 'Master-tavla (1–75)',
+    drawnLabel: 'Dragna',
+    remainingLabel: 'Kvar',
+    waitingPlayersConnect: 'Väntar på att deltagare ansluter med koden...',
+    claimedTag: 'Ropad',
+    tvHeaderAdultQuiz: 'QUIZ · STORBILD / TV',
+    tvHeaderFamilyQuiz: 'FAMILJEQUIZ · STORBILD / TV',
+    tvHeaderSeniorQuiz: 'SENIOR GRENLAND QUIZ · STORBILD / TV',
+    tvHeaderChristmasQuiz: 'JULQUIZ · STORBILD / TV',
+    tvHeaderBingo: 'INJOY TOGETHER · STORBILD / TV',
+    quizMimeRoundPrefix: '🎭 Julmim · Runda',
+    quizReadyTeams: 'Gör lagen redo!',
+    quizQuestionWord: 'Fråga',
+    quizOfWord: 'av',
+    quizTurnWord: 'Tur:',
+    quizMimeSecretNote: 'En spelare väljer hemligt ord hos värden. Ordet visas inte förrän rundan är klar!',
+    quizCategoryWord: 'Kategori:',
+    quizMimingNow: 'mimar nu!',
+    quizSecretWordWas: 'Hemligt mimord var:',
+    quizWelcomeSenior: 'Välkommen till Senior Grenland Quiz!',
+    quizWelcomeDefault: 'Välkommen till Quizen!',
+    quizConnectCodePrefix: 'Anslut med koden',
+    quizHostControlsNote: 'Värden har öppnat quizrummet och styr när frågor och facit visas.',
+    quizConnectedCountLabel: 'Anslutna deltagare:',
+    quizMusicGuessBadge: '🎵 Musikgissning (Ljudklipp & Quiz)',
+    quizWriteAnswerBadge: '✍️ Skrivsvar',
+    quizSongWasPrefix: '🎶 Låten var:',
+    quizAudioQuestionBadge: '🎵 LJUDFRÅGA · Lyssna på melodin & läs frågan!',
+    quizHintPrefix: '💡 Tips:',
+    quizCorrectBadge: '✓ RÄTT!',
+    quizAnswersHidden: 'Svaren är dolda tills värden visar facit!',
+    quizAnswersCountSuffix: 'svar mottagna hittills',
+    quizAnswerKey: '✓ FACIT:',
+    quizWordplayPrefix: '😄 Ordlek:',
+    quizResultsTitle: 'Resultattavla — Tack för matchen!',
+    quizPointsSuffix: 'poäng',
+  },
+  de: {
+    invalidCodeErr: 'Gib einen gültigen Raumcode (mind. 3 Zeichen) ein.',
+    noActiveStreamErr: 'Noch keine aktive Übertragung für diesen Code gefunden.',
+    serverErr: 'Server für TV-Ansicht nicht erreichbar. Bitte erneut versuchen.',
+    connectSubtitle: 'Verbinde Fernseher oder Beamer mit dem Spiel des Gastgebers.',
+    hostCodeInputLabel: 'Raumcode des Gastgebers für TV:',
+    hiddenInputNote: 'Verdeckte Eingabe schützt den Code während der Eingabe.',
+    connectingTvBtn: 'Verbinde mit TV-Stream...',
+    startTvBtn: '📺 Großbild / TV-Ansicht starten',
+    backNormalBtn: '⇦ Zurück zur normalen Ansicht',
+    audienceOnlyBadge: 'Nur Publikumsanzeige',
+    playersTogetherSuffix: 'Spieler gemeinsam',
+    participantCodeLabel: 'Teilnahmecode:',
+    bingoTvBtn: '🎱 Bingo TV',
+    quizTvBtn: '🎭 Quiz TV',
+    lastBallLabel: 'Letzte Kugel',
+    of75Drawn: 'von 75 gezogen',
+    waitingFirstDraw: '🎯 Bereit! Warte auf erste Kugel des Gastgebers...',
+    prevBallsLabel: 'Vorherige:',
+    masterBoardTitle: 'Haupttafel (1–75)',
+    drawnLabel: 'Gezogen',
+    remainingLabel: 'Übrig',
+    waitingPlayersConnect: 'Warte auf Teilnehmer mit dem Code...',
+    claimedTag: 'Gerufen',
+    tvHeaderAdultQuiz: 'QUIZ · GROSSBILDSCHIRM / TV',
+    tvHeaderFamilyQuiz: 'FAMILIENQUIZ · GROSSBILDSCHIRM / TV',
+    tvHeaderSeniorQuiz: 'SENIOR GRENLAND QUIZ · TV',
+    tvHeaderChristmasQuiz: 'WEIHNACHTSQUIZ · TV',
+    tvHeaderBingo: 'INJOY TOGETHER · GROSSBILDSCHIRM / TV',
+    quizMimeRoundPrefix: '🎭 Pantomime · Runde',
+    quizReadyTeams: 'Teams bereit machen!',
+    quizQuestionWord: 'Frage',
+    quizOfWord: 'von',
+    quizTurnWord: 'Zug:',
+    quizMimeSecretNote: 'Ein Spieler wählt beim Host ein geheimes Wort.',
+    quizCategoryWord: 'Kategorie:',
+    quizMimingNow: 'spielt Pantomime!',
+    quizSecretWordWas: 'Geheimes Wort war:',
+    quizWelcomeSenior: 'Willkommen beim Senior Grenland Quiz!',
+    quizWelcomeDefault: 'Willkommen beim Quiz!',
+    quizConnectCodePrefix: 'Beitreten mit Code',
+    quizHostControlsNote: 'Der Gastgeber steuert Fragen und Lösungen.',
+    quizConnectedCountLabel: 'Verbundene Teilnehmer:',
+    quizMusicGuessBadge: '🎵 Musikraten (Audio & Quiz)',
+    quizWriteAnswerBadge: '✍️ Freitext-Antwort',
+    quizSongWasPrefix: '🎶 Der Song war:',
+    quizAudioQuestionBadge: '🎵 AUDIO-FRAGE · Höre die Melodie!',
+    quizHintPrefix: '💡 Hinweis:',
+    quizCorrectBadge: '✓ RICHTIG!',
+    quizAnswersHidden: 'Antworten sind verborgen, bis der Gastgeber sie zeigt!',
+    quizAnswersCountSuffix: 'Antworten erhalten',
+    quizAnswerKey: '✓ LÖSUNG:',
+    quizWordplayPrefix: '😄 Wortspiel:',
+    quizResultsTitle: 'Ergebnistafel — Danke fürs Mitspielen!',
+    quizPointsSuffix: 'Punkte',
+  },
+  es: {
+    invalidCodeErr: 'Introduce un código de sala válido (mín. 3 caracteres).',
+    noActiveStreamErr: 'Aún no hay transmisión activa para este código.',
+    serverErr: 'No se pudo conectar al servidor de TV. Inténtalo de nuevo.',
+    connectSubtitle: 'Conecta el televisor o proyector al juego del anfitrión.',
+    hostCodeInputLabel: 'Código de sala del anfitrión para TV:',
+    hiddenInputNote: 'La entrada oculta evita que el público vea el código mientras lo escribes.',
+    connectingTvBtn: 'Conectando a la vista TV...',
+    startTvBtn: '📺 Iniciar Pantalla Grande / TV',
+    backNormalBtn: '⇦ Volver a la vista normal',
+    audienceOnlyBadge: 'Solo pantalla de público',
+    playersTogetherSuffix: 'jugadores juntos',
+    participantCodeLabel: 'Código:',
+    bingoTvBtn: '🎱 Bingo TV',
+    quizTvBtn: '🎭 Quiz TV',
+    lastBallLabel: 'Última bola',
+    of75Drawn: 'de 75 sacadas',
+    waitingFirstDraw: '🎯 ¡Listo! Esperando la primera bola del anfitrión...',
+    prevBallsLabel: 'Anteriores:',
+    masterBoardTitle: 'Tablero Maestro (1–75)',
+    drawnLabel: 'Sacadas',
+    remainingLabel: 'Quedan',
+    waitingPlayersConnect: 'Esperando a que los participantes se unan...',
+    claimedTag: 'Cantado',
+    tvHeaderAdultQuiz: 'QUIZ · PANTALLA GRANDE / TV',
+    tvHeaderFamilyQuiz: 'QUIZ FAMILIAR · TV',
+    tvHeaderSeniorQuiz: 'SENIOR GRENLAND QUIZ · TV',
+    tvHeaderChristmasQuiz: 'QUIZ DE NAVIDAD · TV',
+    tvHeaderBingo: 'INJOY TOGETHER · PANTALLA GRANDE / TV',
+    quizMimeRoundPrefix: '🎭 Mímica · Ronda',
+    quizReadyTeams: '¡Preparen los equipos!',
+    quizQuestionWord: 'Pregunta',
+    quizOfWord: 'de',
+    quizTurnWord: 'Turno:',
+    quizMimeSecretNote: 'Un jugador elige una palabra secreta con el anfitrión.',
+    quizCategoryWord: 'Categoría:',
+    quizMimingNow: 'está haciendo mímica!',
+    quizSecretWordWas: 'La palabra secreta era:',
+    quizWelcomeSenior: '¡Bienvenidos al Quiz Senior Grenland!',
+    quizWelcomeDefault: '¡Bienvenidos al Quiz!',
+    quizConnectCodePrefix: 'Únete con el código',
+    quizHostControlsNote: 'El anfitrión controla cuándo se muestran preguntas y respuestas.',
+    quizConnectedCountLabel: 'Participantes conectados:',
+    quizMusicGuessBadge: '🎵 Adivina la música',
+    quizWriteAnswerBadge: '✍️ Respuesta escrita',
+    quizSongWasPrefix: '🎶 La canción era:',
+    quizAudioQuestionBadge: '🎵 PREGUNTA MUSICAL · ¡Escucha la melodía!',
+    quizHintPrefix: '💡 Pista:',
+    quizCorrectBadge: '✓ ¡CORRECTO!',
+    quizAnswersHidden: '¡Respuestas ocultas hasta que el anfitrión las revele!',
+    quizAnswersCountSuffix: 'respuestas recibidas',
+    quizAnswerKey: '✓ RESPUESTA:',
+    quizWordplayPrefix: '😄 Juego de palabras:',
+    quizResultsTitle: 'Tabla de posiciones — ¡Gracias por jugar!',
+    quizPointsSuffix: 'pts',
+  },
+  fr: {
+    invalidCodeErr: 'Entrez un code de salle valide (min. 3 caractères).',
+    noActiveStreamErr: 'Aucune diffusion active trouvée pour ce code.',
+    serverErr: 'Impossible de contacter le serveur TV. Réessayez.',
+    connectSubtitle: 'Connectez la TV ou le projecteur à la partie de l’hôte.',
+    hostCodeInputLabel: 'Code de salle de l’hôte pour la TV :',
+    hiddenInputNote: 'La saisie masquée empêche le public de voir le code.',
+    connectingTvBtn: 'Connexion à la diffusion TV...',
+    startTvBtn: '📺 Lancer Grand Écran / TV',
+    backNormalBtn: '⇦ Retour à la vue normale',
+    audienceOnlyBadge: 'Écran public uniquement',
+    playersTogetherSuffix: 'joueurs ensemble',
+    participantCodeLabel: 'Code :',
+    bingoTvBtn: '🎱 Bingo TV',
+    quizTvBtn: '🎭 Quiz TV',
+    lastBallLabel: 'Dernière boule',
+    of75Drawn: 'sur 75 tirées',
+    waitingFirstDraw: '🎯 Prêt ! En attente du premier tirage de l’hôte...',
+    prevBallsLabel: 'Précédentes :',
+    masterBoardTitle: 'Tableau Principal (1–75)',
+    drawnLabel: 'Tirées',
+    remainingLabel: 'Restantes',
+    waitingPlayersConnect: 'En attente des participants...',
+    claimedTag: 'Réclamé',
+    tvHeaderAdultQuiz: 'QUIZ · GRAND ÉCRAN / TV',
+    tvHeaderFamilyQuiz: 'QUIZ FAMILLE · GRAND ÉCRAN / TV',
+    tvHeaderSeniorQuiz: 'SENIOR GRENLAND QUIZ · TV',
+    tvHeaderChristmasQuiz: 'QUIZ DE NOËL · TV',
+    tvHeaderBingo: 'INJOY TOGETHER · GRAND ÉCRAN / TV',
+    quizMimeRoundPrefix: '🎭 Mime · Manche',
+    quizReadyTeams: 'Préparez les équipes !',
+    quizQuestionWord: 'Question',
+    quizOfWord: 'sur',
+    quizTurnWord: 'Tour :',
+    quizMimeSecretNote: 'Un joueur choisit un mot secret avec l’hôte.',
+    quizCategoryWord: 'Catégorie :',
+    quizMimingNow: 'mime maintenant !',
+    quizSecretWordWas: 'Le mot secret était :',
+    quizWelcomeSenior: 'Bienvenue au Quiz Senior Grenland !',
+    quizWelcomeDefault: 'Bienvenue au Quiz !',
+    quizConnectCodePrefix: 'Rejoindre avec le code',
+    quizHostControlsNote: 'L’hôte contrôle l’affichage des questions et réponses.',
+    quizConnectedCountLabel: 'Participants connectés :',
+    quizMusicGuessBadge: '🎵 Deviner la musique',
+    quizWriteAnswerBadge: '✍️ Réponse écrite',
+    quizSongWasPrefix: '🎶 La chanson était :',
+    quizAudioQuestionBadge: '🎵 QUESTION AUDIO · Écoutez la mélodie !',
+    quizHintPrefix: '💡 Indice :',
+    quizCorrectBadge: '✓ CORRECT !',
+    quizAnswersHidden: 'Les réponses sont masquées jusqu’à la révélation !',
+    quizAnswersCountSuffix: 'réponses reçues',
+    quizAnswerKey: '✓ RÉPONSE :',
+    quizWordplayPrefix: '😄 Jeu de mots :',
+    quizResultsTitle: 'Classement — Merci d’avoir joué !',
+    quizPointsSuffix: 'pts',
+  },
+  ti: {
+    invalidCodeErr: 'ካብ መራሒ ዝተዋህበ ቅኑዕ ኮድ (ብውሕዱ 3 ፊደላት) ኣእቱ።',
+    noActiveStreamErr: 'ነዚ ኮድ ንጡፍ ስክሪን ኣይተረኽበን።',
+    serverErr: 'ምስ ሰርቨር ቲቪ ክራኸብ ኣይከኣለን።',
+    connectSubtitle: 'ቲቪ ወይ ፕሮጀክተር ምስ ጸወታ መራሒ ኣራኽብ።',
+    hostCodeInputLabel: 'ኮድ ክፍሊ መራሒ ንቲቪ:',
+    hiddenInputNote: 'ሕቡእ ምጽሓፍ ተሳተፍቲ ከይርእዩ ይሕግዝ።',
+    connectingTvBtn: 'ናብ ቲቪ ይራኸብ ኣሎ...',
+    startTvBtn: '📺 ዓቢ ስክሪን / ቲቪ ጀምር',
+    backNormalBtn: '⇦ ናብ ንቡር ምለስ',
+    audienceOnlyBadge: 'ስክሪን ተዓዘብቲ ጥራይ',
+    playersTogetherSuffix: 'ተጻወትቲ ብሓባር',
+    participantCodeLabel: 'ኮድ ተሳተፍቲ:',
+    bingoTvBtn: '🎱 ቢንጎ ቲቪ',
+    quizTvBtn: '🎭 ኩዊዝ ቲቪ',
+    lastBallLabel: 'ናይ መወዳእታ ኩዕሶ',
+    of75Drawn: 'ካብ 75 ዝተሳሕባ',
+    waitingFirstDraw: '🎯 ድሉው! መራሒ ቀዳመይቲ ኩዕሶ ክሳብ ዝስሕብ ይጽበ ኣሎ...',
+    prevBallsLabel: 'ዝሓለፋ:',
+    masterBoardTitle: 'ዋና ሰሌዳ (1–75)',
+    drawnLabel: 'ዝተሳሕባ',
+    remainingLabel: 'ዝተረፋ',
+    waitingPlayersConnect: 'ተሳተፍቲ ብኮድ ክሳብ ዝኣትዉ ይጽበ ኣሎ...',
+    claimedTag: 'ተጨዲሩ',
+    tvHeaderAdultQuiz: 'ኩዊዝ · ዓቢ ስክሪን / ቲቪ',
+    tvHeaderFamilyQuiz: 'ኩዊዝ ስድራ · ቲቪ',
+    tvHeaderSeniorQuiz: 'ሲኒየር ግሬንላንድ ኩዊዝ · ቲቪ',
+    tvHeaderChristmasQuiz: 'ኩዊዝ ልደት · ቲቪ',
+    tvHeaderBingo: 'INJOY TOGETHER · ዓቢ ስክሪን / ቲቪ',
+    quizMimeRoundPrefix: '🎭 ማይም · ዙር',
+    quizReadyTeams: 'ጋንታታት ተዳለዉ!',
+    quizQuestionWord: 'ሕቶ',
+    quizOfWord: 'ካብ',
+    quizTurnWord: 'ተራ:',
+    quizMimeSecretNote: 'ሓደ ተጻዋታይ ሕቡእ ቃል ምስ መራሒ ይመርጽ።',
+    quizCategoryWord: 'ምድብ:',
+    quizMimingNow: 'ሕጂ የርኢ ኣሎ!',
+    quizSecretWordWas: 'ሕቡእ ቃል:',
+    quizWelcomeSenior: 'እንቋዕ ናብ ሲኒየር ግሬንላንድ ኩዊዝ ብደሓን መጻእኩም!',
+    quizWelcomeDefault: 'እንቋዕ ናብ ኩዊዝ ብደሓን መጻእኩም!',
+    quizConnectCodePrefix: 'ብኮድ ተጸንበሩ',
+    quizHostControlsNote: 'መራሒ ሕቶታትን መልስታትን የመሓድር።',
+    quizConnectedCountLabel: 'ዝተራኸቡ ተሳተፍቲ:',
+    quizMusicGuessBadge: '🎵 ግምት ሙዚቃ',
+    quizWriteAnswerBadge: '✍️ መልሲ ጽሓፍ',
+    quizSongWasPrefix: '🎶 እታ ደርፊ:',
+    quizAudioQuestionBadge: '🎵 ሕቶ ድምጺ · ነቲ ዜማ ስምዕዎ!',
+    quizHintPrefix: '💡 ሓበሬታ:',
+    quizCorrectBadge: '✓ ቅኑዕ!',
+    quizAnswersHidden: 'መራሒ መልሲ ክሳብ ዝገልጽ መልስታት ሕቡእ እዩ!',
+    quizAnswersCountSuffix: 'መልስታት ተቐቢልና',
+    quizAnswerKey: '✓ ቅኑዕ መልሲ:',
+    quizWordplayPrefix: '😄 ጸወታ ቃላት:',
+    quizResultsTitle: 'ውጽኢት — የቐንየልና!',
+    quizPointsSuffix: 'ነጥቢ',
+  },
+  ar: {
+    invalidCodeErr: 'أدخل رمز غرفة صالح (3 أحرف على الأقل) من المنظم.',
+    noActiveStreamErr: 'لا يوجد بث نشط لهذا الرمز بعد.',
+    serverErr: 'تعذر الاتصال بخادم عرض التلفاز. حاول مجددًا.',
+    connectSubtitle: 'وصّل التلفاز أو البروجيكتور بلعبة المنظم.',
+    hostCodeInputLabel: 'رمز غرفة المنظم لتوصيل التلفاز:',
+    hiddenInputNote: 'الإدخال المخفي يمنع الجمهور من رؤية الرمز أثناء كتابته.',
+    connectingTvBtn: 'جاري الاتصال ببث التلفاز...',
+    startTvBtn: '📺 بدء الشاشة الكبيرة / التلفاز',
+    backNormalBtn: '⇦ العودة للعرض العادي',
+    audienceOnlyBadge: 'شاشة الجمهور فقط',
+    playersTogetherSuffix: 'لاعبين معًا',
+    participantCodeLabel: 'رمز الانضمام:',
+    bingoTvBtn: '🎱 بينغو TV',
+    quizTvBtn: '🎭 كويز TV',
+    lastBallLabel: 'آخر كرة',
+    of75Drawn: 'من أصل 75 مسحوبة',
+    waitingFirstDraw: '🎯 جاهز! بانتظار سحب المنظم لأول كرة...',
+    prevBallsLabel: 'السابقة:',
+    masterBoardTitle: 'اللوحة الرئيسية (1–75)',
+    drawnLabel: 'مسحوبة',
+    remainingLabel: 'متبقية',
+    waitingPlayersConnect: 'بانتظار اتصال المشاركين بالرمز...',
+    claimedTag: 'مُطالب بها',
+    tvHeaderAdultQuiz: 'كويز · الشاشة الكبيرة / TV',
+    tvHeaderFamilyQuiz: 'كويز العائلة · الشاشة الكبيرة / TV',
+    tvHeaderSeniorQuiz: 'كويز سينيور غرينلاند · TV',
+    tvHeaderChristmasQuiz: 'كويز الأعياد · TV',
+    tvHeaderBingo: 'INJOY TOGETHER · الشاشة الكبيرة / TV',
+    quizMimeRoundPrefix: '🎭 التمثيل الصامت · جولة',
+    quizReadyTeams: 'جهزوا الفرق!',
+    quizQuestionWord: 'سؤال',
+    quizOfWord: 'من',
+    quizTurnWord: 'دور:',
+    quizMimeSecretNote: 'يختار أحد اللاعبين كلمة سرية عند المنظم.',
+    quizCategoryWord: 'الفئة:',
+    quizMimingNow: 'يمثل الآن!',
+    quizSecretWordWas: 'الكلمة السرية كانت:',
+    quizWelcomeSenior: 'مرحبًا بكم في كويز سينيور غرينلاند!',
+    quizWelcomeDefault: 'مرحبًا بكم في الكويز!',
+    quizConnectCodePrefix: 'انضم بالرمز',
+    quizHostControlsNote: 'يتحكم المنظم في وقت عرض الأسئلة والإجابات.',
+    quizConnectedCountLabel: 'المشاركون المتصلون:',
+    quizMusicGuessBadge: '🎵 تخمين الموسيقى',
+    quizWriteAnswerBadge: '✍️ إجابة كتابية',
+    quizSongWasPrefix: '🎶 الأغنية كانت:',
+    quizAudioQuestionBadge: '🎵 سؤال صوتي · استمع إلى اللحن!',
+    quizHintPrefix: '💡 تلميح:',
+    quizCorrectBadge: '✓ صحيح!',
+    quizAnswersHidden: 'الإجابات مخفية حتى يكشفها المنظم!',
+    quizAnswersCountSuffix: 'إجابات مستلمة',
+    quizAnswerKey: '✓ الإجابة الصحيحة:',
+    quizWordplayPrefix: '😄 تلاعب بالكلمات:',
+    quizResultsTitle: 'لوحة النتائج — شكرًا للعبكم!',
+    quizPointsSuffix: 'نقطة',
+  },
+};
 
 interface TvProjectorScreenProps {
   initialGame?: 'bingo' | 'quiz' | 'auto';
@@ -63,6 +573,12 @@ export const TvProjectorScreen: React.FC<TvProjectorScreenProps> = ({
   initialCode = '',
   onExitTvMode,
 }) => {
+  const { lang } = useTranslation();
+  const ui = getBingoUiTexts(lang);
+  const ex = TV_EXTRA[lang] || TV_EXTRA.nb;
+  const exRef = useRef(ex);
+  exRef.current = ex;
+
   const [connectedCode, setConnectedCode] = useState<string>(() =>
     initialCode.trim().toUpperCase().replace(/[^A-Z0-9]/g, '')
   );
@@ -93,7 +609,7 @@ export const TvProjectorScreen: React.FC<TvProjectorScreenProps> = ({
   ) => {
     const cleanCode = rawCode.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
     if (cleanCode.length < 3) {
-      setConnectError('Skriv inn en gyldig romkode (minst 3 tegn) fra arrangøren.');
+      setConnectError(exRef.current.invalidCodeErr);
       return;
     }
 
@@ -133,9 +649,7 @@ export const TvProjectorScreen: React.FC<TvProjectorScreenProps> = ({
 
       if (!check?.valid) {
         setIsConnecting(false);
-        setConnectError(
-          'Fant ingen aktiv sending for denne koden ennå. Arrangøren må først åpne spillet på sin enhet.'
-        );
+        setConnectError(exRef.current.noActiveStreamErr);
         return;
       }
 
@@ -158,7 +672,7 @@ export const TvProjectorScreen: React.FC<TvProjectorScreenProps> = ({
         remoteBingo.watchAsTv(cleanCode);
       }
     } catch {
-      setConnectError('Kunne ikke kontakte serveren for TV-visning. Prøv igjen.');
+      setConnectError(exRef.current.serverErr);
     } finally {
       setIsConnecting(false);
     }
@@ -290,10 +804,10 @@ export const TvProjectorScreen: React.FC<TvProjectorScreenProps> = ({
           </div>
           <div>
             <h1 className="font-heading font-black text-2xl text-amber-200">
-              Storskjerm / Prosjektor / TV
+              {ui.tvWaitingTitle}
             </h1>
             <p className="text-xs text-slate-300 mt-1.5 leading-relaxed">
-              Koble TV-en eller projektoren til arrangørens spill. Deltakerkoden er åpen for publikum på alle skjermer, mens fasiter og arrangørens private innloggingskode holdes helt skjult!
+              {ex.connectSubtitle}
             </p>
           </div>
 
@@ -307,7 +821,7 @@ export const TvProjectorScreen: React.FC<TvProjectorScreenProps> = ({
           >
             <div>
               <label className="block text-xs font-bold text-amber-300 uppercase tracking-wider mb-1.5">
-                Arrangørens romkode for TV-oppkobling:
+                {ex.hostCodeInputLabel}
               </label>
               <input
                 type="password"
@@ -323,7 +837,7 @@ export const TvProjectorScreen: React.FC<TvProjectorScreenProps> = ({
                 required
               />
               <span className="text-[11px] text-slate-400 mt-1 block">
-                Skjult inntasting hindrer at publikum ser koden på projektoren mens du skriver den.
+                {ex.hiddenInputNote}
               </span>
             </div>
 
@@ -338,7 +852,7 @@ export const TvProjectorScreen: React.FC<TvProjectorScreenProps> = ({
               disabled={isConnecting}
               className="w-full py-3.5 px-4 rounded-xl bg-gradient-to-r from-amber-400 to-amber-500 hover:brightness-110 text-slate-950 font-black text-sm cursor-pointer shadow-lg disabled:opacity-60"
             >
-              {isConnecting ? 'Kobler til TV-sending...' : '📺 Start Storskjerm / TV-visning'}
+              {isConnecting ? ex.connectingTvBtn : ex.startTvBtn}
             </button>
           </form>
 
@@ -348,7 +862,7 @@ export const TvProjectorScreen: React.FC<TvProjectorScreenProps> = ({
               onClick={handleExit}
               className="w-full py-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/15 text-xs font-bold text-slate-300 cursor-pointer"
             >
-              ⇦ Tilbake til vanlig visning
+              {ex.backNormalBtn}
             </button>
           )}
         </div>
@@ -398,50 +912,50 @@ export const TvProjectorScreen: React.FC<TvProjectorScreenProps> = ({
               <h1 className="font-heading font-black text-lg sm:text-2xl text-amber-200 tracking-tight">
                 {activeGame === 'quiz'
                   ? quizEdition === 'adult'
-                    ? 'QUIZ · STORSKJERM / TV'
+                    ? ex.tvHeaderAdultQuiz
                     : quizEdition === 'family'
-                    ? 'FAMILIEQUIZ · STORSKJERM / TV'
+                    ? ex.tvHeaderFamilyQuiz
                     : quizEdition === 'senior'
-                    ? 'SENIOR GRENLAND QUIZ · STORSKJERM / TV'
-                    : 'JULEQUIZ · STORSKJERM / TV'
-                  : 'INJOY TOGETHER · STORSKJERM / TV'}
+                    ? ex.tvHeaderSeniorQuiz
+                    : ex.tvHeaderChristmasQuiz
+                  : ex.tvHeaderBingo}
               </h1>
               <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-400/50 text-emerald-200 text-[10px] font-black uppercase tracking-wider">
-                Kun publikumsskjerm{activeGame === 'bingo' ? ` · Runde ${bingoTvState?.roundNumber || 1}` : ''}
+                {ex.audienceOnlyBadge}{activeGame === 'bingo' ? ` · ${ui.round} ${bingoTvState?.roundNumber || 1}` : ''}
               </span>
             </div>
             <div className="flex items-center flex-wrap gap-2 text-xs text-slate-300 mt-1">
               <span>
-                Arrangør:{' '}
+                {ui.host}:{' '}
                 <strong className="text-white">
                   {activeGame === 'quiz'
-                    ? quizSnapshot?.hostName || 'Arrangør'
-                    : bingoTvState?.hostName || 'Arrangør'}
+                    ? quizSnapshot?.hostName || ui.host
+                    : bingoTvState?.hostName || ui.host}
                 </strong>
               </span>
               <span aria-hidden="true">·</span>
               {activeGame === 'bingo' && (
                 <>
                   <span className="px-2.5 py-0.5 rounded-lg bg-emerald-950 border border-emerald-400/60 text-emerald-200 font-black">
-                    👥 {bingoPlayers.length} spillere sammen
+                    👥 {bingoPlayers.length} {ex.playersTogetherSuffix}
                   </span>
                   <span aria-hidden="true">·</span>
                 </>
               )}
               {visibleCodeOnScreen ? (
                 <span className="px-2.5 py-0.5 rounded-lg bg-cyan-950 border border-cyan-400 text-cyan-100 font-mono font-black tracking-widest">
-                  📡 Deltakerkode: {visibleCodeOnScreen}
+                  📡 {ex.participantCodeLabel} {visibleCodeOnScreen}
                 </span>
               ) : (
                 <span className="px-2.5 py-0.5 rounded-lg bg-white/5 border border-white/15 text-slate-300 font-semibold">
-                  🔒 Deltakerkode midlertidig skjult av arrangør
+                  🔒 {ui.tvCodeHiddenLabel}
                 </span>
               )}
             </div>
           </div>
         </div>
 
-        {/* Minimal TV Controls (Never exposes host secrets or draw controls) */}
+        {/* Minimal TV Controls */}
         <div className="flex items-center gap-2 flex-wrap">
           <div className="flex items-center p-1 rounded-xl bg-black/60 border border-white/15">
             <button
@@ -453,7 +967,7 @@ export const TvProjectorScreen: React.FC<TvProjectorScreenProps> = ({
                   : 'text-slate-300 hover:text-white'
               }`}
             >
-              🎱 Bingo TV
+              {ex.bingoTvBtn}
             </button>
             <button
               type="button"
@@ -464,7 +978,7 @@ export const TvProjectorScreen: React.FC<TvProjectorScreenProps> = ({
                   : 'text-slate-300 hover:text-white'
               }`}
             >
-              🎭 Quiz TV
+              {ex.quizTvBtn}
             </button>
           </div>
 
@@ -476,8 +990,8 @@ export const TvProjectorScreen: React.FC<TvProjectorScreenProps> = ({
               const m = sounds.toggleMute();
               setIsMuted(m);
             }}
-            aria-label={isMuted ? 'Slå på lyd og stemme' : 'Demp lyd og stemme'}
-            title={isMuted ? 'Slå på opplesing og lyd' : 'Demp opplesing og lyd'}
+            aria-label={isMuted ? ui.unmuteSound : ui.muteSound}
+            title={isMuted ? ui.unmuteSound : ui.muteSound}
             className="px-2.5 py-2 rounded-xl bg-amber-950/70 border border-amber-500/40 hover:border-amber-300 text-amber-200 text-xs font-bold cursor-pointer"
           >
             {isMuted ? '🔇' : '🔊'}
@@ -490,7 +1004,7 @@ export const TvProjectorScreen: React.FC<TvProjectorScreenProps> = ({
             onClick={toggleFullscreen}
             className="px-3 py-2 rounded-xl bg-amber-950/70 border border-amber-500/40 hover:border-amber-300 text-amber-200 text-xs font-bold cursor-pointer"
           >
-            {isFullscreen ? '⛶ Lukk Fullskjerm' : '⛶ Fullskjerm TV'}
+            ⛶ {isFullscreen ? ui.exitFullscreen : ui.fullscreen}
           </button>
 
           {onExitTvMode && (
@@ -499,7 +1013,7 @@ export const TvProjectorScreen: React.FC<TvProjectorScreenProps> = ({
               onClick={handleExit}
               className="px-3 py-2 rounded-xl bg-white/10 hover:bg-white/15 border border-white/15 text-slate-200 text-xs font-bold cursor-pointer"
             >
-              Avslutt TV-visning
+              {ui.tvExitBtn}
             </button>
           )}
         </div>
@@ -509,21 +1023,25 @@ export const TvProjectorScreen: React.FC<TvProjectorScreenProps> = ({
       {activeGame === 'bingo' && (
         <main className="flex-1 max-w-[1880px] mx-auto w-full py-4 space-y-5">
           {bingoTvState?.lastClaim && (() => {
-            const isFull =
-              bingoTvState.lastClaim.isFullHouse || /fullbrett|fullt?\s*brett/i.test(bingoTvState.lastClaim.pattern);
-            const isLine3 = !isFull && /3\s*\.?\s*rekke/i.test(bingoTvState.lastClaim.pattern);
-            const tierText = isFull ? 'FULLT BRETT' : isLine3 ? '3. REKKER' : '1. REKKE';
+            const tier =
+              bingoTvState.lastClaim.milestone ||
+              (bingoTvState.lastClaim.isFullHouse || /fullt?\s*brett|full_?house|blackout/i.test(bingoTvState.lastClaim.pattern)
+                ? 'fullbrett'
+                : /3\s*\.?\s*rekke|3\s*lines?/i.test(bingoTvState.lastClaim.pattern)
+                ? 'line3'
+                : 'line1');
+            const tierText = formatMilestoneLabel(tier, lang);
             return (
               <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-amber-500 via-rose-500 to-amber-500 text-white text-center shadow-2xl border-2 border-white space-y-1">
                 <div className="font-heading font-black text-xl sm:text-3xl">
-                  🏆 {bingoTvState.lastClaim.playerName.toUpperCase()} HAR FYLT {tierText} OG TRYKKET BINGO! 🏆
+                  {ui.shoutedBannerPrefix} {bingoTvState.lastClaim.playerName.toUpperCase()} {ui.shoutedBannerMid} {tierText.toUpperCase()} {ui.shoutedBannerSuffix} 🏆
                 </div>
                 <div className="text-xs sm:text-sm font-black text-amber-100">
-                  {isFull
-                    ? '🔄 Ny bingorunde starter automatisk for hele salen om få sekunder...'
-                    : isLine3
-                    ? '➡️ Spillet fortsetter nå til FULLT BRETT! (1. og 3. rekker er låst)'
-                    : '➡️ Spillet fortsetter nå til 3. REKKER! (1. rekke er låst)'}
+                  {tier === 'fullbrett'
+                    ? ui.newRoundStartsSoon
+                    : tier === 'line3'
+                    ? ui.continuesToFullbrett
+                    : ui.continuesToLine3}
                 </div>
               </div>
             );
@@ -539,7 +1057,7 @@ export const TvProjectorScreen: React.FC<TvProjectorScreenProps> = ({
                   isAutoCalling={false}
                   onToggleAuto={() => {}}
                   canDraw={false}
-                  readOnlyMessage="🔒 Arrangøren styrer kuletrekningen privat"
+                  readOnlyMessage={`🔒 ${ui.hostControlsNote}`}
                   compactSidebar={false}
                   tumblerSize="tv"
                   layout="stacked"
@@ -551,7 +1069,7 @@ export const TvProjectorScreen: React.FC<TvProjectorScreenProps> = ({
                 {(['line1', 'line3', 'fullbrett'] as const).map((tier) => {
                   const locked = (bingoTvState?.claimedMilestones || []).includes(tier);
                   const winner = bingoTvState?.milestoneWinners?.[tier];
-                  const label = tier === 'line1' ? '1. rekke' : tier === 'line3' ? '3. rekker' : 'Full brett';
+                  const label = formatMilestoneLabel(tier, lang);
                   return (
                     <span
                       key={tier}
@@ -562,7 +1080,7 @@ export const TvProjectorScreen: React.FC<TvProjectorScreenProps> = ({
                       }`}
                     >
                       {locked ? '✓' : '○'} {label}
-                      {winner ? ` (${winner})` : locked ? ' · Ropt' : ''}
+                      {winner ? ` (${winner})` : locked ? ` · ${ex.claimedTag}` : ''}
                     </span>
                   );
                 })}
@@ -584,7 +1102,7 @@ export const TvProjectorScreen: React.FC<TvProjectorScreenProps> = ({
                     </div>
                     <div className="min-w-0">
                       <div className="text-xs uppercase font-black text-amber-300 tracking-wider">
-                        Siste Kule ({calledBalls.length} av 75 trukket)
+                        {ex.lastBallLabel} ({calledBalls.length} {ex.of75Drawn})
                       </div>
                       <div className="font-heading font-black text-lg sm:text-xl text-white leading-snug">
                         &ldquo;{currentBall.affirmation}&rdquo;
@@ -593,14 +1111,14 @@ export const TvProjectorScreen: React.FC<TvProjectorScreenProps> = ({
                   </>
                 ) : (
                   <div className="text-sm text-amber-200/80 py-2">
-                    🎯 Klar for trekk! Venter på at arrangøren trekker første kule...
+                    {ex.waitingFirstDraw}
                   </div>
                 )}
               </div>
 
               {recentBalls.length > 0 && (
                 <div className="p-3.5 rounded-2xl bg-black/45 border border-amber-500/25 flex items-center justify-center gap-2.5">
-                  <span className="text-xs uppercase font-bold text-amber-300/70">Forrige:</span>
+                  <span className="text-xs uppercase font-bold text-amber-300/70">{ex.prevBallsLabel}</span>
                   {recentBalls.map((b, idx) => (
                     <div
                       key={idx}
@@ -619,10 +1137,10 @@ export const TvProjectorScreen: React.FC<TvProjectorScreenProps> = ({
               <div className="p-5 sm:p-6 rounded-3xl bg-amber-950/35 border-2 border-amber-500/30 shadow-2xl">
                 <div className="flex items-center justify-between mb-4 pb-2 border-b border-amber-500/20">
                   <h2 className="font-heading font-black text-lg sm:text-xl text-amber-200">
-                    Master Tavle (1–75)
+                    {ex.masterBoardTitle}
                   </h2>
                   <span className="text-xs font-mono font-bold text-amber-300">
-                    {calledBalls.length} Trukket · {75 - calledBalls.length} Gjenstår
+                    {calledBalls.length} {ex.drawnLabel} · {75 - calledBalls.length} {ex.remainingLabel}
                   </span>
                 </div>
 
@@ -669,15 +1187,15 @@ export const TvProjectorScreen: React.FC<TvProjectorScreenProps> = ({
               <div className="p-5 rounded-3xl bg-black/50 border border-amber-500/25 space-y-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="text-xs font-bold uppercase tracking-wider text-amber-300">
-                    👥 Deltakere som spiller sammen ({bingoPlayers.length} spillere)
+                    👥 {ui.audienceParticipantsBar} ({bingoPlayers.length} {ui.players})
                   </div>
                   <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-400/40 text-emerald-200 text-[10px] font-black">
-                    Runde {bingoTvState?.roundNumber || 1}
+                    {ui.round} {bingoTvState?.roundNumber || 1}
                   </span>
                 </div>
                 {bingoPlayers.length === 0 ? (
                   <div className="text-xs text-slate-400 py-2">
-                    Venter på at deltakere kobler seg til med koden eller starter brett...
+                    {ex.waitingPlayersConnect}
                   </div>
                 ) : (
                   <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5">
@@ -701,10 +1219,10 @@ export const TvProjectorScreen: React.FC<TvProjectorScreenProps> = ({
                               style={{ backgroundColor: p.avatarColor }}
                             />
                             <span className="font-bold text-sm truncate">{p.name}</span>
-                            {p.isRemote && <span className="text-[11px]" title="Tilkoblet på mobil">📱</span>}
+                            {p.isRemote && <span className="text-[11px]" title={ui.mobile}>📱</span>}
                           </div>
                           <span className="font-mono font-black text-xs text-amber-300 shrink-0">
-                            {p.hasBingo ? '🏆 BINGO!' : `${p.linesCompleted} linjer`}
+                            {p.hasBingo ? `🏆 ${ui.cardWonBadge}` : `${p.linesCompleted} ${ui.linesCountLabel}`}
                           </span>
                         </div>
                       ))}
@@ -724,10 +1242,10 @@ export const TvProjectorScreen: React.FC<TvProjectorScreenProps> = ({
               <div>
                 <div className="text-sm font-black text-amber-300">
                   {quizSnapshot?.mimeState?.active
-                    ? `🎭 Katolsk Jule-Mimelek · Runde ${quizSnapshot.mimeState.roundNumber}`
+                    ? `${ex.quizMimeRoundPrefix} ${quizSnapshot.mimeState.roundNumber}`
                     : quizPhase === 'lobby'
-                    ? 'Gjør lagene klare!'
-                    : `Spørsmål ${(quizSnapshot?.questionIndex ?? 0) + 1} av ${quizSnapshot?.totalQuestions || 300}`}
+                    ? ex.quizReadyTeams
+                    : `${ex.quizQuestionWord} ${(quizSnapshot?.questionIndex ?? 0) + 1} ${ex.quizOfWord} ${quizSnapshot?.totalQuestions || 300}`}
                 </div>
               </div>
 
@@ -751,11 +1269,11 @@ export const TvProjectorScreen: React.FC<TvProjectorScreenProps> = ({
                   <>
                     <div className="text-6xl">🤫</div>
                     <h2 className="font-heading font-black text-3xl text-white">
-                      Tur: {TEAM_STYLE[quizSnapshot.mimeState.activeTeamColor]?.icon}{' '}
+                      {ex.quizTurnWord} {TEAM_STYLE[quizSnapshot.mimeState.activeTeamColor]?.icon}{' '}
                       {quizSnapshot.mimeState.activeTeamName}
                     </h2>
                     <p className="text-base text-slate-200 max-w-xl mx-auto">
-                      Én spiller går til arrangøren og velger sitt hemmelige ord. Ordet vises aldri på Storskjermen før runden er ferdig!
+                      {ex.quizMimeSecretNote}
                     </p>
                   </>
                 )}
@@ -772,11 +1290,11 @@ export const TvProjectorScreen: React.FC<TvProjectorScreenProps> = ({
                     </div>
                     <div className="text-6xl">🎭</div>
                     <div className="inline-block px-4 py-1.5 rounded-full bg-amber-400/20 border border-amber-400 text-amber-200 text-xs font-black uppercase">
-                      Kategori: {quizSnapshot.mimeState.category || 'Tro & Jul'}
+                      {ex.quizCategoryWord} {quizSnapshot.mimeState.category || 'Tro & Jul'}
                     </div>
                     <h2 className="font-heading font-black text-3xl sm:text-4xl text-white">
                       {TEAM_STYLE[quizSnapshot.mimeState.activeTeamColor]?.icon}{' '}
-                      {quizSnapshot.mimeState.activeTeamName} mimer nå!
+                      {quizSnapshot.mimeState.activeTeamName} {ex.quizMimingNow}
                     </h2>
                   </>
                 )}
@@ -788,7 +1306,7 @@ export const TvProjectorScreen: React.FC<TvProjectorScreenProps> = ({
                     </div>
                     <div className="p-6 rounded-2xl bg-emerald-500/20 border-2 border-emerald-400 max-w-xl mx-auto">
                       <div className="text-xs font-bold text-emerald-300 uppercase">
-                        Hemmelig mimeord var:
+                        {ex.quizSecretWordWas}
                       </div>
                       <div className="font-heading font-black text-3xl sm:text-4xl text-white mt-1">
                         «{quizSnapshot.mimeState.word}»
@@ -812,23 +1330,23 @@ export const TvProjectorScreen: React.FC<TvProjectorScreenProps> = ({
                     </div>
                     <h2 className="font-heading font-black text-3xl text-white">
                       {quizEdition === 'senior'
-                        ? 'Velkommen til Senior Grenland Quiz (Musikk & Lokalquiz)!'
-                        : 'Velkommen til Quizen!'}
+                        ? ex.quizWelcomeSenior
+                        : ex.quizWelcomeDefault}
                     </h2>
                     <p className="text-base text-slate-200 max-w-xl mx-auto">
                       {visibleCodeOnScreen ? (
                         <>
-                          Koble til med koden{' '}
+                          {ex.quizConnectCodePrefix}{' '}
                           <strong className="font-mono text-2xl text-amber-300 tracking-widest">
                             {visibleCodeOnScreen}
                           </strong>
                         </>
                       ) : (
-                        'Arrangøren har åpnet quizrommet og styrer når første spørsmål og fasit deles til skjermen.'
+                        ex.quizHostControlsNote
                       )}
                     </p>
                     <div className="text-sm font-bold text-emerald-300">
-                      Tilkoblede deltakere: {(quizSnapshot?.participants || []).length}
+                      {ex.quizConnectedCountLabel} {(quizSnapshot?.participants || []).length}
                     </div>
                   </div>
                 )}
@@ -849,11 +1367,11 @@ export const TvProjectorScreen: React.FC<TvProjectorScreenProps> = ({
                     <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-bold">
                       <span className="text-amber-300 uppercase tracking-wider">
                         {publicQuestion.category === 'Musikk-gjetting'
-                          ? '🎵 Musikk-gjetting (Lydklipp & Quiz)'
+                          ? ex.quizMusicGuessBadge
                           : publicQuestion.category}
                       </span>
                       {publicQuestion.questionType === 'open_text' && (
-                        <span className="text-fuchsia-300">✍️ Skriv-svar (AhaSlides)</span>
+                        <span className="text-fuchsia-300">{ex.quizWriteAnswerBadge}</span>
                       )}
                     </div>
 
@@ -868,12 +1386,12 @@ export const TvProjectorScreen: React.FC<TvProjectorScreenProps> = ({
                           <div>
                             <div className="text-xs sm:text-sm font-black text-amber-200 uppercase tracking-wider">
                               {quizPhase === 'reveal' && revealedSong
-                                ? `🎶 Låten var: «${revealedSong.title}» — ${revealedSong.artist} (${revealedSong.decade})`
-                                : '🎵 LYDSPØRSMÅL · Lytt til melodien & les spørsmålet under!'}
+                                ? `${ex.quizSongWasPrefix} «${revealedSong.title}» — ${revealedSong.artist} (${revealedSong.decade})`
+                                : ex.quizAudioQuestionBadge}
                             </div>
                             {publicQuestion.musicHint && (
                               <div className="text-sm sm:text-base text-amber-100/90 font-semibold mt-0.5">
-                                💡 Hint: {publicQuestion.musicHint}
+                                {ex.quizHintPrefix} {publicQuestion.musicHint}
                               </div>
                             )}
                           </div>
@@ -906,7 +1424,7 @@ export const TvProjectorScreen: React.FC<TvProjectorScreenProps> = ({
                                       {style.icon} {entry.teamName} · {entry.submittedBy}
                                     </span>
                                     {isRevealed && entry.isCorrect && (
-                                      <span className="text-emerald-300 font-black">✓ RIKTIG!</span>
+                                      <span className="text-emerald-300 font-black">{ex.quizCorrectBadge}</span>
                                     )}
                                   </div>
                                   <div className="font-heading font-black text-xl text-white break-words">
@@ -920,17 +1438,17 @@ export const TvProjectorScreen: React.FC<TvProjectorScreenProps> = ({
                           <div className="p-6 rounded-2xl bg-black/50 border border-fuchsia-400/30 text-center space-y-2">
                             <div className="text-3xl">🔒</div>
                             <div className="font-bold text-lg text-white">
-                              Svarene er skjult til arrangøren deler fasiten!
+                              {ex.quizAnswersHidden}
                             </div>
                             <div className="text-xs text-amber-300 font-mono font-bold">
-                              {quizSnapshot?.liveOpenAnswerCount || 0} svar mottatt så langt
+                              {quizSnapshot?.liveOpenAnswerCount || 0} {ex.quizAnswersCountSuffix}
                             </div>
                           </div>
                         )}
 
                         {quizPhase === 'reveal' && (
                           <div className="p-5 rounded-2xl bg-emerald-500/20 border-2 border-emerald-400 text-white">
-                            <div className="text-xs font-bold text-emerald-300">✓ FASIT:</div>
+                            <div className="text-xs font-bold text-emerald-300">{ex.quizAnswerKey}</div>
                             <div className="font-heading font-black text-2xl mt-0.5">
                               {publicQuestion.options[0] || publicQuestion.acceptedAnswers?.[0]}
                             </div>
@@ -960,7 +1478,7 @@ export const TvProjectorScreen: React.FC<TvProjectorScreenProps> = ({
                                 {opt}
                               </span>
                               {isCorrect && (
-                                <span className="text-emerald-300 font-black">✓ RIKTIG!</span>
+                                <span className="text-emerald-300 font-black">{ex.quizCorrectBadge}</span>
                               )}
                             </div>
                           );
@@ -970,7 +1488,7 @@ export const TvProjectorScreen: React.FC<TvProjectorScreenProps> = ({
 
                     {quizPhase === 'reveal' && publicQuestion.wordplayJoke && (
                       <div className="p-5 rounded-2xl bg-amber-500/15 border border-amber-400/50 text-amber-100 text-base font-medium leading-relaxed">
-                        😄 <strong>Kveldens ordlek:</strong> {publicQuestion.wordplayJoke}
+                        <strong>{ex.quizWordplayPrefix}</strong> {publicQuestion.wordplayJoke}
                       </div>
                     )}
                   </div>
@@ -980,7 +1498,7 @@ export const TvProjectorScreen: React.FC<TvProjectorScreenProps> = ({
                   <div className="py-10 text-center space-y-5">
                     <div className="text-6xl">🏆</div>
                     <h2 className="font-heading font-black text-3xl text-amber-300">
-                      Resultattavle — Takk for kampen!
+                      {ex.quizResultsTitle}
                     </h2>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-2xl mx-auto">
                       {sortedQuizLeaderboard.map((team, rank) => {
@@ -1037,7 +1555,7 @@ export const TvProjectorScreen: React.FC<TvProjectorScreenProps> = ({
                       )}
                     </div>
                     <div className="font-mono tabular-nums font-black text-xl text-white">
-                      {score} poeng
+                      {score} {ex.quizPointsSuffix}
                     </div>
                   </div>
                 );

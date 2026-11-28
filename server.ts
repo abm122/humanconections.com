@@ -251,9 +251,9 @@ interface BingoHostRoomEntry {
   showCodeOnScreen: boolean;
   playersSummary: BingoTvPlayerSummary[];
   themeTitle?: string;
-  lastClaim?: { playerName: string; pattern: string; isFullHouse?: boolean; milestone?: ServerBingoMilestone; timestamp: number } | null;
   claimedMilestones?: ServerBingoMilestone[];
   milestoneWinners?: Partial<Record<ServerBingoMilestone, string>>;
+  lastClaim?: { playerName: string; pattern: string; isFullHouse?: boolean; milestone?: ServerBingoMilestone; claimId?: string; timestamp: number } | null;
 }
 
 interface MusicBingoParticipantProgress {
@@ -276,7 +276,7 @@ interface MusicBingoRoomState {
   revealCurrentSong: boolean;
   clipStartedAt: number;
   clipDurationSec: number;
-  lastClaim: { playerName: string; pattern: string; timestamp: number } | null;
+  lastClaim: { playerName: string; pattern: string; isFullHouse?: boolean; milestone?: ServerBingoMilestone; claimId?: string; timestamp: number } | null;
   claimedMilestones?: ServerBingoMilestone[];
   milestoneWinners?: Partial<Record<ServerBingoMilestone, string>>;
   participants: Map<string, MusicBingoParticipantProgress>;
@@ -286,9 +286,24 @@ const quizRooms = new Map<string, QuizRoomState>();
 const bingoHostRooms = new Map<string, BingoHostRoomEntry>();
 const musicBingoRooms = new Map<string, MusicBingoRoomState>();
 const pendingBingoRoundTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const pendingMusicRoundTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const processedClaimIds = new Map<string, number>();
 const bingoRemoteProgressByRoom = new Map<string, Map<string, BingoTvPlayerSummary>>();
 const activeTvGameByCode = new Map<string, 'quiz' | 'bingo'>();
 const lastFirestoreSyncByCode = new Map<string, number>();
+
+function recordProcessedClaimId(claimId: string): boolean {
+  const now = Date.now();
+  for (const [cid, ts] of processedClaimIds.entries()) {
+    if (now - ts > 10 * 60 * 1000) {
+      processedClaimIds.delete(cid);
+    }
+  }
+  if (!claimId) return true;
+  if (processedClaimIds.has(claimId)) return false;
+  processedClaimIds.set(claimId, now);
+  return true;
+}
 
 function serializeMusicRoom(room: MusicBingoRoomState) {
   return {
@@ -750,6 +765,433 @@ function executeBingoNewRound(
   });
   broadcastBingoTvState(roomId, entry);
   scheduleSaveActiveRooms();
+}
+
+function executeMusicNewRound(
+  rawCode: string,
+  mRoom: MusicBingoRoomState,
+  winnerName?: string,
+  reason: 'fullbrett' | 'host' = 'fullbrett'
+) {
+  const code = cleanRoomCode(rawCode);
+  const pendingTimer = pendingMusicRoundTimers.get(code);
+  if (pendingTimer) {
+    clearTimeout(pendingTimer);
+    pendingMusicRoundTimers.delete(code);
+  }
+  mRoom.roundNumber = (mRoom.roundNumber || 1) + 1;
+  mRoom.playedSongIds = [];
+  mRoom.currentSongId = null;
+  mRoom.revealCurrentSong = false;
+  mRoom.clipStartedAt = 0;
+  mRoom.lastClaim = null;
+  mRoom.claimedMilestones = [];
+  mRoom.milestoneWinners = {};
+  for (const [uid, prog] of mRoom.participants.entries()) {
+    mRoom.participants.set(uid, { ...prog, markedCount: 0, linesCompleted: 0, hasBingo: false });
+  }
+  const bingoRoomId = `joy-bingo-${code}`;
+  const quizRoomId = `joy-quiz-${code}`;
+  const newRoundMsg = JSON.stringify({
+    type: 'music:new_round',
+    payload: {
+      roomCode: code,
+      roundNumber: mRoom.roundNumber,
+      winnerName: winnerName || '',
+      reason,
+      claimedMilestones: [],
+      milestoneWinners: {},
+      timestamp: Date.now(),
+    },
+  });
+  for (const [clientWs, client] of clients.entries()) {
+    if (
+      clientWs.readyState === WebSocket.OPEN &&
+      (isClientInRoom(client, bingoRoomId) || isClientInRoom(client, quizRoomId) || client.tvWatchCode === code)
+    ) {
+      clientWs.send(newRoundMsg);
+    }
+  }
+  broadcastMusicBingoState(code, mRoom);
+}
+
+async function processBingoRemoteClaim(params: {
+  roomCode?: unknown;
+  targetRoomId?: string;
+  senderId: string;
+  playerName?: unknown;
+  pattern?: unknown;
+  isFullHouse?: boolean;
+  cardIndex?: unknown;
+  confirmedNumbers?: unknown;
+  calledBalls?: unknown;
+  claimId?: unknown;
+}) {
+  const cleanCode = cleanRoomCode(
+    params.roomCode || (params.targetRoomId || '').replace(/^joy-bingo-/i, '')
+  );
+  const targetBingoRoom = cleanCode.length >= 3 ? `joy-bingo-${cleanCode}` : (params.targetRoomId || '');
+  if (!targetBingoRoom) {
+    return {
+      ok: false as const,
+      status: 400,
+      rejectedPayload: {
+        message: 'Fant ingen aktiv bingorunde for denne koden.',
+        claimedMilestones: [] as ServerBingoMilestone[],
+        milestoneWinners: {} as Partial<Record<ServerBingoMilestone, string>>,
+      },
+    };
+  }
+
+  if (!bingoHostRooms.has(targetBingoRoom) && cleanCode.length >= 3) {
+    await hydrateRoomFromFirestoreIfNeeded(cleanCode);
+  }
+  if (!bingoHostRooms.has(targetBingoRoom) && cleanCode.length >= 3) {
+    ensureUnifiedArrangementRooms(cleanCode, 'http-host', 'Arrangør');
+  }
+
+  const entry = bingoHostRooms.get(targetBingoRoom);
+  if (entry && Array.isArray(params.calledBalls) && params.calledBalls.length > 0 && entry.calledBalls.length === 0) {
+    const sanitizedBalls = params.calledBalls
+      .map((b: any) => {
+        const num = Math.trunc(Number(b?.number ?? b));
+        return Number.isInteger(num) && num >= 1 && num <= 75 ? buildCalledBallFromNumber(num) : null;
+      })
+      .filter(Boolean);
+    if (sanitizedBalls.length > 0) {
+      entry.calledBalls = sanitizedBalls;
+    }
+  }
+
+  const cleanName = sanitizeMessage(String(params.playerName || 'Spiller')).cleanText || 'Spiller';
+  const cleanPattern = sanitizeMessage(String(params.pattern || 'FULLBRETT')).cleanText || 'FULLBRETT';
+  const isFullHouse = Boolean(params.isFullHouse) || /fullbrett|fullt?\s*brett|full_?house|blackout/i.test(cleanPattern);
+  const milestoneTier = resolveBingoMilestoneFromPattern(cleanPattern, isFullHouse);
+  const displayPattern = isFullHouse
+    ? 'FULLBRETT BINGO'
+    : milestoneTier === 'line3'
+    ? '3. REKKER'
+    : '1. REKKE';
+  const claimId = typeof params.claimId === 'string' ? params.claimId.slice(0, 64) : '';
+
+  if (entry) {
+    const existingClaimed = Array.isArray(entry.claimedMilestones) ? entry.claimedMilestones : [];
+    const existingWinners = entry.milestoneWinners || {};
+
+    if (claimId && !recordProcessedClaimId(claimId)) {
+      return {
+        ok: true as const,
+        duplicate: true,
+        claimPayload: {
+          userId: params.senderId,
+          playerName: entry.lastClaim?.playerName || cleanName,
+          pattern: entry.lastClaim?.pattern || displayPattern,
+          milestone: entry.lastClaim?.milestone || milestoneTier,
+          isFullHouse: Boolean(entry.lastClaim?.isFullHouse ?? isFullHouse),
+          roundNumber: entry.roundNumber || 1,
+          claimedMilestones: existingClaimed,
+          milestoneWinners: existingWinners,
+          autoNewRoundDelayMs: isFullHouse ? 4500 : 0,
+          cardIndex: Number(params.cardIndex) || 0,
+          claimId,
+          timestamp: entry.lastClaim?.timestamp || Date.now(),
+        },
+      };
+    }
+
+    if (existingClaimed.includes(milestoneTier)) {
+      const prevWinner = existingWinners[milestoneTier];
+      const tierLabel =
+        milestoneTier === 'fullbrett'
+          ? 'Full brett'
+          : milestoneTier === 'line3'
+          ? '3. rekker'
+          : '1. rekke';
+      const nextHint =
+        milestoneTier === 'line1'
+          ? 'Bingorop er låst til 3. rekker eller fullt brett er fullført.'
+          : milestoneTier === 'line3'
+          ? 'Bingorop er låst til fullt brett er fullført.'
+          : 'Runden avsluttes straks.';
+      return {
+        ok: false as const,
+        status: 409,
+        rejectedPayload: {
+          milestone: milestoneTier,
+          claimedMilestones: existingClaimed,
+          milestoneWinners: existingWinners,
+          message: prevWinner
+            ? `🔒 ${tierLabel} er allerede ropt av ${prevWinner}! ${nextHint}`
+            : `🔒 ${tierLabel} er allerede ropt i dette rommet! ${nextHint}`,
+        },
+      };
+    }
+
+    const minRequiredBalls = isFullHouse ? 24 : milestoneTier === 'line3' ? 10 : 4;
+    if (entry.calledBalls.length < minRequiredBalls) {
+      return {
+        ok: false as const,
+        status: 400,
+        rejectedPayload: {
+          milestone: milestoneTier,
+          claimedMilestones: existingClaimed,
+          milestoneWinners: existingWinners,
+          message: 'For få kuler er trukket til å rope bingo for dette mønsteret ennå.',
+        },
+      };
+    }
+
+    if (Array.isArray(params.confirmedNumbers)) {
+      const drawnSet = new Set(entry.calledBalls.map((b) => Number(b.number)));
+      const nonFreeNums = params.confirmedNumbers
+        .map((n: unknown) => Math.trunc(Number(n)))
+        .filter((n: number) => Number.isInteger(n) && n >= 1 && n <= 75 && n !== 38);
+      const uniqueNonFree = Array.from(new Set(nonFreeNums));
+      const allValid = uniqueNonFree.length >= minRequiredBalls && uniqueNonFree.every((n) => drawnSet.has(n));
+      if (!allValid) {
+        return {
+          ok: false as const,
+          status: 400,
+          rejectedPayload: {
+            milestone: milestoneTier,
+            claimedMilestones: existingClaimed,
+            milestoneWinners: existingWinners,
+            message: 'Alle tall i vinnerrekken må være trukket og bekreftet før du kan rope BINGO!',
+          },
+        };
+      }
+    }
+
+    const nextClaimedSet = new Set<ServerBingoMilestone>(existingClaimed);
+    nextClaimedSet.add(milestoneTier);
+    if (milestoneTier === 'line3' || milestoneTier === 'fullbrett') {
+      nextClaimedSet.add('line1');
+    }
+    if (milestoneTier === 'fullbrett') {
+      nextClaimedSet.add('line3');
+    }
+    entry.claimedMilestones = Array.from(nextClaimedSet);
+    entry.milestoneWinners = {
+      ...existingWinners,
+      [milestoneTier]: cleanName,
+    };
+    const claimTs = Date.now();
+    entry.lastClaim = {
+      playerName: cleanName,
+      pattern: displayPattern,
+      isFullHouse,
+      milestone: milestoneTier,
+      claimId: claimId || `cl-${claimTs}`,
+      timestamp: claimTs,
+    };
+    scheduleSaveActiveRooms();
+    broadcastBingoTvState(targetBingoRoom, entry);
+  }
+
+  const claimPayload = {
+    userId: params.senderId,
+    playerName: cleanName,
+    pattern: displayPattern,
+    milestone: milestoneTier,
+    isFullHouse,
+    roundNumber: entry?.roundNumber || 1,
+    claimedMilestones: entry?.claimedMilestones || [milestoneTier],
+    milestoneWinners: entry?.milestoneWinners || { [milestoneTier]: cleanName },
+    autoNewRoundDelayMs: isFullHouse ? 4500 : 0,
+    cardIndex: Number(params.cardIndex) || 0,
+    claimId: claimId || entry?.lastClaim?.claimId || `cl-${Date.now()}`,
+    timestamp: entry?.lastClaim?.timestamp || Date.now(),
+  };
+
+  broadcastToRoom(targetBingoRoom, {
+    type: 'bingo:remote_claimed',
+    payload: claimPayload,
+  });
+
+  if (entry && isFullHouse && !pendingBingoRoundTimers.has(targetBingoRoom)) {
+    const timer = setTimeout(() => {
+      pendingBingoRoundTimers.delete(targetBingoRoom);
+      const latest = bingoHostRooms.get(targetBingoRoom);
+      if (latest) {
+        executeBingoNewRound(targetBingoRoom, latest, cleanName, 'fullbrett');
+      }
+    }, 4500);
+    pendingBingoRoundTimers.set(targetBingoRoom, timer);
+  }
+
+  return { ok: true as const, claimPayload };
+}
+
+function processMusicBingoClaim(params: {
+  roomCode?: unknown;
+  senderId: string;
+  playerName?: unknown;
+  pattern?: unknown;
+  linesCompleted?: unknown;
+  hasFullHouse?: boolean;
+  claimId?: unknown;
+}) {
+  const code = cleanRoomCode(params.roomCode);
+  if (!code || code.length < 3) {
+    return {
+      ok: false as const,
+      status: 400,
+      rejectedPayload: {
+        message: 'Ugyldig romkode for Musikkbingo.',
+        claimedMilestones: [] as ServerBingoMilestone[],
+        milestoneWinners: {} as Partial<Record<ServerBingoMilestone, string>>,
+      },
+    };
+  }
+
+  let mRoom = musicBingoRooms.get(code);
+  if (!mRoom) {
+    const bingoEntry = bingoHostRooms.get(`joy-bingo-${code}`);
+    mRoom = {
+      roomCode: code,
+      hostId: bingoEntry?.hostId || 'http-host',
+      hostKey: bingoEntry?.hostKey,
+      hostName: bingoEntry?.hostName || 'Arrangør',
+      roundNumber: 1,
+      isActive: true,
+      playedSongIds: [],
+      currentSongId: null,
+      revealCurrentSong: false,
+      clipStartedAt: 0,
+      clipDurationSec: 30,
+      lastClaim: null,
+      claimedMilestones: [],
+      milestoneWinners: {},
+      participants: new Map(),
+    };
+    musicBingoRooms.set(code, mRoom);
+  }
+
+  const cleanName = sanitizeMessage(String(params.playerName || 'Deltaker')).cleanText || 'Deltaker';
+  const cleanPattern = sanitizeMessage(String(params.pattern || 'MUSIKKBINGO')).cleanText || 'MUSIKKBINGO';
+  const isFull = Boolean(params.hasFullHouse) || /fullt?\s*brett|full_?house|blackout/i.test(cleanPattern);
+  const tier = resolveBingoMilestoneFromPattern(cleanPattern, isFull);
+  const claimedList = Array.isArray(mRoom.claimedMilestones) ? mRoom.claimedMilestones : [];
+  const claimId = typeof params.claimId === 'string' ? params.claimId.slice(0, 64) : '';
+
+  if (claimId && !recordProcessedClaimId(claimId)) {
+    return {
+      ok: true as const,
+      duplicate: true,
+      claimPayload: {
+        roomCode: code,
+        playerName: mRoom.lastClaim?.playerName || cleanName,
+        pattern: mRoom.lastClaim?.pattern || cleanPattern,
+        milestone: mRoom.lastClaim?.milestone || tier,
+        isFullHouse: Boolean(mRoom.lastClaim?.isFullHouse ?? (tier === 'fullbrett')),
+        roundNumber: mRoom.roundNumber || 1,
+        claimedMilestones: claimedList,
+        milestoneWinners: mRoom.milestoneWinners || {},
+        autoNewRoundDelayMs: tier === 'fullbrett' ? 4500 : 0,
+        claimId,
+        timestamp: mRoom.lastClaim?.timestamp || Date.now(),
+      },
+    };
+  }
+
+  if (claimedList.includes(tier)) {
+    const prevWinner = mRoom.milestoneWinners?.[tier];
+    const tierLabel = tier === 'fullbrett' ? 'Fullt brett' : tier === 'line3' ? '3. rekker' : '1. rekke';
+    return {
+      ok: false as const,
+      status: 409,
+      rejectedPayload: {
+        milestone: tier,
+        claimedMilestones: claimedList,
+        milestoneWinners: mRoom.milestoneWinners || {},
+        message: prevWinner
+          ? `🔒 ${tierLabel} er allerede ropt av ${prevWinner}! Vent til neste rekke/brett er fullført.`
+          : `🔒 ${tierLabel} er allerede ropt! Vent til neste rekke/brett er fullført.`,
+      },
+    };
+  }
+
+  const trackedProg = mRoom.participants.get(params.senderId);
+  const reportedLines =
+    typeof params.linesCompleted === 'number'
+      ? params.linesCompleted
+      : trackedProg?.linesCompleted;
+  const requiredLines = tier === 'fullbrett' ? 10 : tier === 'line3' ? 3 : 1;
+  if (typeof reportedLines === 'number' && reportedLines < requiredLines) {
+    return {
+      ok: false as const,
+      status: 400,
+      rejectedPayload: {
+        milestone: tier,
+        claimedMilestones: claimedList,
+        milestoneWinners: mRoom.milestoneWinners || {},
+        message: `🔒 Du må ha fylt minst ${requiredLines} ${requiredLines === 1 ? 'hel rekke' : 'rekker'} på brettet før du kan rope BINGO!`,
+      },
+    };
+  }
+
+  const nextSet = new Set<ServerBingoMilestone>(claimedList);
+  nextSet.add(tier);
+  if (tier === 'line3' || tier === 'fullbrett') nextSet.add('line1');
+  if (tier === 'fullbrett') nextSet.add('line3');
+  mRoom.claimedMilestones = Array.from(nextSet);
+  mRoom.milestoneWinners = {
+    ...(mRoom.milestoneWinners || {}),
+    [tier]: cleanName,
+  };
+  const claimTimestamp = Date.now();
+  const resolvedClaimId = claimId || `mcl-${claimTimestamp}`;
+  mRoom.lastClaim = {
+    playerName: cleanName,
+    pattern: cleanPattern,
+    isFullHouse: tier === 'fullbrett',
+    milestone: tier,
+    claimId: resolvedClaimId,
+    timestamp: claimTimestamp,
+  };
+  broadcastMusicBingoState(code, mRoom);
+
+  const claimPayload = {
+    roomCode: code,
+    playerName: cleanName,
+    pattern: cleanPattern,
+    milestone: tier,
+    isFullHouse: tier === 'fullbrett',
+    roundNumber: mRoom.roundNumber || 1,
+    claimedMilestones: mRoom.claimedMilestones,
+    milestoneWinners: mRoom.milestoneWinners,
+    autoNewRoundDelayMs: tier === 'fullbrett' ? 4500 : 0,
+    claimId: resolvedClaimId,
+    timestamp: claimTimestamp,
+  };
+
+  const musicClaimNotice = JSON.stringify({
+    type: 'music:bingo_claimed',
+    payload: claimPayload,
+  });
+  const bingoRoomId = `joy-bingo-${code}`;
+  const quizRoomId = `joy-quiz-${code}`;
+  for (const [clientWs, client] of clients.entries()) {
+    if (
+      clientWs.readyState === WebSocket.OPEN &&
+      (isClientInRoom(client, bingoRoomId) || isClientInRoom(client, quizRoomId) || client.tvWatchCode === code)
+    ) {
+      clientWs.send(musicClaimNotice);
+    }
+  }
+
+  if (tier === 'fullbrett' && !pendingMusicRoundTimers.has(code)) {
+    const timer = setTimeout(() => {
+      pendingMusicRoundTimers.delete(code);
+      const latest = musicBingoRooms.get(code);
+      if (latest) {
+        executeMusicNewRound(code, latest, cleanName, 'fullbrett');
+      }
+    }, 4500);
+    pendingMusicRoundTimers.set(code, timer);
+  }
+
+  return { ok: true as const, claimPayload };
 }
 
 function moveTvViewersToGame(roomCode: string, targetGame: 'quiz' | 'bingo') {
@@ -1369,119 +1811,23 @@ wss.on('connection', (ws) => {
 
         case 'bingo:remote_claim': {
           const targetBingoRoom = resolveBingoRoomId(currentClient, payload);
-          // A remote or Storskjerm participant physically claimed BINGO (1. rekke, 3. rekker, or Fullbrett)!
-          const cleanName = sanitizeMessage(payload.playerName || currentClient.name).cleanText || 'Spiller';
-          const cleanPattern = sanitizeMessage(payload.pattern || 'FULLBRETT').cleanText || 'FULLBRETT';
-          const isFullHouse = Boolean(payload?.isFullHouse) || /fullbrett|fullt?\s*brett|full_?house|blackout/i.test(cleanPattern);
-          const milestoneTier = resolveBingoMilestoneFromPattern(cleanPattern, isFullHouse);
-          const displayPattern = isFullHouse
-            ? 'FULLBRETT BINGO'
-            : milestoneTier === 'line3'
-            ? '3. REKKER'
-            : cleanPattern;
-
-          const entry = bingoHostRooms.get(targetBingoRoom);
-          if (entry) {
-            const existingClaimed = Array.isArray(entry.claimedMilestones) ? entry.claimedMilestones : [];
-            if (existingClaimed.includes(milestoneTier)) {
-              const prevWinner = entry.milestoneWinners?.[milestoneTier];
-              const tierLabel =
-                milestoneTier === 'fullbrett'
-                  ? 'Full brett'
-                  : milestoneTier === 'line3'
-                  ? '3. rekker'
-                  : '1. rekke';
-              const nextHint =
-                milestoneTier === 'line1'
-                  ? 'Bingorop er låst til 3. rekker eller fullt brett er fullført.'
-                  : milestoneTier === 'line3'
-                  ? 'Bingorop er låst til fullt brett er fullført.'
-                  : 'Runden avsluttes straks.';
-              ws.send(JSON.stringify({
-                type: 'bingo:claim_rejected',
-                payload: {
-                  milestone: milestoneTier,
-                  claimedMilestones: existingClaimed,
-                  milestoneWinners: entry.milestoneWinners || {},
-                  message: prevWinner
-                    ? `🔒 ${tierLabel} er allerede ropt av ${prevWinner}! ${nextHint}`
-                    : `🔒 ${tierLabel} er allerede ropt i dette rommet! ${nextHint}`,
-                },
-              }));
-              break;
-            }
-
-            const minRequiredBalls = isFullHouse ? 24 : milestoneTier === 'line3' ? 12 : 4;
-            if (entry.calledBalls.length < minRequiredBalls) {
-              ws.send(JSON.stringify({
-                type: 'bingo:claim_rejected',
-                payload: { message: 'For få kuler er trukket til å rope bingo for dette mønsteret ennå.' },
-              }));
-              break;
-            }
-            if (Array.isArray(payload?.confirmedNumbers)) {
-              const drawnSet = new Set(entry.calledBalls.map((b) => b.number));
-              const nonFreeNums = payload.confirmedNumbers.filter((n: unknown) => typeof n === 'number' && n !== 38);
-              const allValid = nonFreeNums.length >= minRequiredBalls && nonFreeNums.every((n: number) => drawnSet.has(n));
-              if (!allValid) {
-                ws.send(JSON.stringify({
-                  type: 'bingo:claim_rejected',
-                  payload: { message: 'Alle tall i vinnerrekken må være trukket og bekreftet før du kan rope BINGO!' },
-                }));
-                break;
-              }
-            }
-
-            const nextClaimedSet = new Set<ServerBingoMilestone>(existingClaimed);
-            nextClaimedSet.add(milestoneTier);
-            if (milestoneTier === 'line3' || milestoneTier === 'fullbrett') {
-              nextClaimedSet.add('line1');
-            }
-            if (milestoneTier === 'fullbrett') {
-              nextClaimedSet.add('line3');
-            }
-            entry.claimedMilestones = Array.from(nextClaimedSet);
-            entry.milestoneWinners = {
-              ...(entry.milestoneWinners || {}),
-              [milestoneTier]: cleanName,
-            };
-            entry.lastClaim = {
-              playerName: cleanName,
-              pattern: displayPattern,
-              isFullHouse,
-              milestone: milestoneTier,
-              timestamp: Date.now(),
-            };
-            scheduleSaveActiveRooms();
-            broadcastBingoTvState(targetBingoRoom, entry);
-          }
-
-          broadcastToRoom(targetBingoRoom, {
-            type: 'bingo:remote_claimed',
-            payload: {
-              userId: currentClient.id,
-              playerName: cleanName,
-              pattern: displayPattern,
-              milestone: milestoneTier,
-              isFullHouse,
-              roundNumber: entry?.roundNumber || 1,
-              claimedMilestones: entry?.claimedMilestones || [milestoneTier],
-              milestoneWinners: entry?.milestoneWinners || { [milestoneTier]: cleanName },
-              autoNewRoundDelayMs: isFullHouse ? 4500 : 0,
-              cardIndex: payload.cardIndex ?? 0,
-              timestamp: Date.now()
-            }
+          const result = await processBingoRemoteClaim({
+            roomCode: payload?.roomCode,
+            targetRoomId: targetBingoRoom,
+            senderId: currentClient.id,
+            playerName: payload?.playerName || currentClient.name,
+            pattern: payload?.pattern || 'FULLBRETT',
+            isFullHouse: payload?.isFullHouse,
+            cardIndex: payload?.cardIndex,
+            confirmedNumbers: payload?.confirmedNumbers,
+            calledBalls: payload?.calledBalls,
+            claimId: payload?.claimId,
           });
-
-          if (entry && isFullHouse && !pendingBingoRoundTimers.has(targetBingoRoom)) {
-            const timer = setTimeout(() => {
-              pendingBingoRoundTimers.delete(targetBingoRoom);
-              const latest = bingoHostRooms.get(targetBingoRoom);
-              if (latest) {
-                executeBingoNewRound(targetBingoRoom, latest, cleanName, 'fullbrett');
-              }
-            }, 4500);
-            pendingBingoRoundTimers.set(targetBingoRoom, timer);
+          if (!result.ok) {
+            ws.send(JSON.stringify({
+              type: 'bingo:claim_rejected',
+              payload: result.rejectedPayload,
+            }));
           }
           break;
         }
@@ -1603,6 +1949,12 @@ wss.on('connection', (ws) => {
               }
             }
             const cleanHostName = sanitizeMessage(String(payload?.hostName || currentClient.name || 'Arrangør')).cleanText || 'Arrangør';
+            const mergedCalledBalls =
+              existing?.calledBalls && existing.calledBalls.length > 0
+                ? existing.calledBalls
+                : Array.isArray(payload?.calledBalls) && payload.calledBalls.length > 0
+                ? payload.calledBalls
+                : [];
             const nextEntry: BingoHostRoomEntry = {
               roomId: bingoRoomId,
               roomCode: code,
@@ -1611,7 +1963,7 @@ wss.on('connection', (ws) => {
               hostName: cleanHostName,
               createdAt: existing?.createdAt || Date.now(),
               roundNumber: existing?.roundNumber || 1,
-              calledBalls: existing?.calledBalls || [],
+              calledBalls: mergedCalledBalls,
               showCodeOnScreen: existing?.showCodeOnScreen ?? true,
               playersSummary: existing?.playersSummary || [],
               themeTitle: existing?.themeTitle,
@@ -2390,18 +2742,12 @@ wss.on('connection', (ws) => {
           if (mRoom.hostId !== currentClient.id && (!mRoom.hostKey || !incomingKey || mRoom.hostKey !== incomingKey)) {
             break;
           }
-          mRoom.roundNumber = (mRoom.roundNumber || 1) + 1;
-          mRoom.playedSongIds = [];
-          mRoom.currentSongId = null;
-          mRoom.revealCurrentSong = false;
-          mRoom.clipStartedAt = 0;
-          mRoom.lastClaim = null;
-          mRoom.claimedMilestones = [];
-          mRoom.milestoneWinners = {};
-          for (const [uid, prog] of mRoom.participants.entries()) {
-            mRoom.participants.set(uid, { ...prog, markedCount: 0, linesCompleted: 0, hasBingo: false });
-          }
-          broadcastMusicBingoState(code, mRoom);
+          executeMusicNewRound(
+            code,
+            mRoom,
+            payload?.winnerName ? sanitizeMessage(String(payload.winnerName)).cleanText : undefined,
+            'host'
+          );
           break;
         }
 
@@ -2487,89 +2833,20 @@ wss.on('connection', (ws) => {
 
         case 'music:claim_bingo': {
           const code = cleanRoomCode(payload?.roomCode || currentClient.roomId.replace(/^joy-(bingo|quiz)-/i, ''));
-          if (!code) break;
-          const mRoom = musicBingoRooms.get(code);
-          if (!mRoom) break;
-          const cleanName = sanitizeMessage(String(payload?.playerName || currentClient.name || 'Deltaker')).cleanText || 'Deltaker';
-          const cleanPattern = sanitizeMessage(String(payload?.pattern || 'MUSIKKBINGO')).cleanText || 'MUSIKKBINGO';
-          const isFull = Boolean(payload?.hasFullHouse) || /fullt?\s*brett|full_?house|blackout/i.test(cleanPattern);
-          const tier = resolveBingoMilestoneFromPattern(cleanPattern, isFull);
-          const claimedList = Array.isArray(mRoom.claimedMilestones) ? mRoom.claimedMilestones : [];
-          if (claimedList.includes(tier)) {
-            const prevWinner = mRoom.milestoneWinners?.[tier];
-            const tierLabel = tier === 'fullbrett' ? 'Fullt brett' : tier === 'line3' ? '3. rekker' : '1. rekke';
-            ws.send(JSON.stringify({
-              type: 'music:claim_rejected',
-              payload: {
-                milestone: tier,
-                claimedMilestones: claimedList,
-                milestoneWinners: mRoom.milestoneWinners || {},
-                message: prevWinner
-                  ? `🔒 ${tierLabel} er allerede ropt av ${prevWinner}! Vent til neste rekke/brett er fullført.`
-                  : `🔒 ${tierLabel} er allerede ropt! Vent til neste rekke/brett er fullført.`,
-              },
-            }));
-            break;
-          }
-
-          const trackedProg = mRoom.participants.get(currentClient.id);
-          const reportedLines =
-            typeof payload?.linesCompleted === 'number'
-              ? payload.linesCompleted
-              : trackedProg?.linesCompleted;
-          const requiredLines = tier === 'fullbrett' ? 10 : tier === 'line3' ? 3 : 1;
-          if (typeof reportedLines === 'number' && reportedLines < requiredLines) {
-            ws.send(JSON.stringify({
-              type: 'music:claim_rejected',
-              payload: {
-                milestone: tier,
-                claimedMilestones: claimedList,
-                milestoneWinners: mRoom.milestoneWinners || {},
-                message: `🔒 Du må ha fylt minst ${requiredLines} ${requiredLines === 1 ? 'hel rekke' : 'rekker'} på brettet før du kan rope BINGO!`,
-              },
-            }));
-            break;
-          }
-
-          const nextSet = new Set<ServerBingoMilestone>(claimedList);
-          nextSet.add(tier);
-          if (tier === 'line3' || tier === 'fullbrett') nextSet.add('line1');
-          if (tier === 'fullbrett') nextSet.add('line3');
-          mRoom.claimedMilestones = Array.from(nextSet);
-          mRoom.milestoneWinners = {
-            ...(mRoom.milestoneWinners || {}),
-            [tier]: cleanName,
-          };
-          const claimTimestamp = Date.now();
-          mRoom.lastClaim = {
-            playerName: cleanName,
-            pattern: cleanPattern,
-            timestamp: claimTimestamp,
-          };
-          broadcastMusicBingoState(code, mRoom);
-
-          const musicClaimNotice = JSON.stringify({
-            type: 'music:bingo_claimed',
-            payload: {
-              roomCode: code,
-              playerName: cleanName,
-              pattern: cleanPattern,
-              milestone: tier,
-              isFullHouse: tier === 'fullbrett',
-              claimedMilestones: mRoom.claimedMilestones,
-              milestoneWinners: mRoom.milestoneWinners,
-              timestamp: claimTimestamp,
-            },
+          const result = processMusicBingoClaim({
+            roomCode: code,
+            senderId: currentClient.id,
+            playerName: payload?.playerName || currentClient.name,
+            pattern: payload?.pattern || 'MUSIKKBINGO',
+            linesCompleted: payload?.linesCompleted,
+            hasFullHouse: payload?.hasFullHouse,
+            claimId: payload?.claimId,
           });
-          const bingoRoomId = `joy-bingo-${code}`;
-          const quizRoomId = `joy-quiz-${code}`;
-          for (const [clientWs, client] of clients.entries()) {
-            if (
-              clientWs.readyState === WebSocket.OPEN &&
-              (isClientInRoom(client, bingoRoomId) || isClientInRoom(client, quizRoomId) || client.tvWatchCode === code)
-            ) {
-              clientWs.send(musicClaimNotice);
-            }
+          if (!result.ok) {
+            ws.send(JSON.stringify({
+              type: 'music:claim_rejected',
+              payload: result.rejectedPayload,
+            }));
           }
           break;
         }
@@ -2958,6 +3235,90 @@ app.get('/api/rooms/state', async (req, res) => {
     quizSnapshot: hasQuiz && qRoom ? serializeQuizRoomPublic(qRoom, false) : null,
     musicSnapshot: mRoom ? serializeMusicRoom(mRoom) : null,
   });
+});
+
+// HTTP fallbacks for reliable Bingo & Music Bingo shouts and round resets across reconnects / multi-instance setups
+app.post('/api/rooms/bingo/claim', async (req, res) => {
+  const { roomCode, senderId, playerName, pattern, isFullHouse, cardIndex, confirmedNumbers, calledBalls, claimId } = req.body || {};
+  const result = await processBingoRemoteClaim({
+    roomCode,
+    senderId: typeof senderId === 'string' && senderId.trim() ? senderId.trim().slice(0, 64) : 'http-client',
+    playerName,
+    pattern,
+    isFullHouse,
+    cardIndex,
+    confirmedNumbers,
+    calledBalls,
+    claimId,
+  });
+  if (!result.ok) {
+    return res.status(result.status).json({ success: false, ...result.rejectedPayload });
+  }
+  return res.json({ success: true, claim: result.claimPayload });
+});
+
+app.post('/api/rooms/bingo/new_round', (req, res) => {
+  const { roomCode, hostKey, winnerName } = req.body || {};
+  const cleanCode = cleanRoomCode(roomCode);
+  if (!cleanCode || cleanCode.length < 3) {
+    return res.status(400).json({ success: false, error: 'Ugyldig romkode' });
+  }
+  const targetRoomId = `joy-bingo-${cleanCode}`;
+  const entry = bingoHostRooms.get(targetRoomId);
+  if (!entry) {
+    return res.status(404).json({ success: false, error: 'Fant ingen aktiv bingorunde' });
+  }
+  if (entry.hostKey && String(hostKey || '') !== entry.hostKey) {
+    return res.status(403).json({ success: false, error: 'Kun arrangøren kan starte ny runde' });
+  }
+  executeBingoNewRound(
+    targetRoomId,
+    entry,
+    winnerName ? sanitizeMessage(String(winnerName)).cleanText : undefined,
+    'host'
+  );
+  return res.json({ success: true, roundNumber: entry.roundNumber });
+});
+
+app.post('/api/rooms/music/claim', (req, res) => {
+  const { roomCode, senderId, playerName, pattern, linesCompleted, hasFullHouse, claimId } = req.body || {};
+  const result = processMusicBingoClaim({
+    roomCode,
+    senderId: typeof senderId === 'string' && senderId.trim() ? senderId.trim().slice(0, 64) : 'http-client',
+    playerName,
+    pattern,
+    linesCompleted,
+    hasFullHouse,
+    claimId,
+  });
+  if (!result.ok) {
+    return res.status(result.status).json({ success: false, ...result.rejectedPayload });
+  }
+  return res.json({ success: true, claim: result.claimPayload });
+});
+
+app.post('/api/rooms/music/new_round', (req, res) => {
+  const { roomCode, hostKey, winnerName } = req.body || {};
+  const cleanCode = cleanRoomCode(roomCode);
+  if (!cleanCode || cleanCode.length < 3) {
+    return res.status(400).json({ success: false, error: 'Ugyldig romkode' });
+  }
+  const mRoom = musicBingoRooms.get(cleanCode);
+  const bingoEntry = bingoHostRooms.get(`joy-bingo-${cleanCode}`);
+  if (!mRoom) {
+    return res.status(404).json({ success: false, error: 'Fant ingen aktiv Musikkbingo-runde' });
+  }
+  const expectedKey = mRoom.hostKey || bingoEntry?.hostKey;
+  if (expectedKey && String(hostKey || '') !== expectedKey) {
+    return res.status(403).json({ success: false, error: 'Kun arrangøren kan starte ny runde' });
+  }
+  executeMusicNewRound(
+    cleanCode,
+    mRoom,
+    winnerName ? sanitizeMessage(String(winnerName)).cleanText : undefined,
+    'host'
+  );
+  return res.json({ success: true, roundNumber: mRoom.roundNumber });
 });
 
 // =========================================================================
