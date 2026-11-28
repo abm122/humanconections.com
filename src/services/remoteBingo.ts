@@ -132,12 +132,16 @@ class RemoteBingoService {
 
   constructor() {
     if (typeof window !== 'undefined') {
-      // Gjenopprett lagret kode kun dersom arrangør/eier allerede har gyldig tilgang; ikke slett fra localStorage før async Firebase-auth rekker å laste
+      // Slett eventuelle gamle koder fra localStorage slik at koder fra gårsdagens økt ALDRI gjenbrukes ved ny innlogging
+      localStorage.removeItem(STORAGE_KEY_HOST_CODE);
+      localStorage.removeItem(STORAGE_KEY_ROUND_LOCKED);
+
+      // Gjenopprett kode kun innenfor samme aktive nettleser-sesjon (F5), og bare dersom arrangør/eier allerede har gyldig tilgang
       if (sessionTimer.hasPaidAccess() || this.canActAsHost()) {
-        const savedHost = localStorage.getItem(STORAGE_KEY_HOST_CODE);
+        const savedHost = sessionStorage.getItem(STORAGE_KEY_HOST_CODE);
         if (savedHost && savedHost.length >= 3) {
           this.hostCode = savedHost;
-          this.codeLockedForRound = localStorage.getItem(STORAGE_KEY_ROUND_LOCKED) === '1';
+          this.codeLockedForRound = sessionStorage.getItem(STORAGE_KEY_ROUND_LOCKED) === '1';
         }
       }
 
@@ -162,6 +166,21 @@ class RemoteBingoService {
 
       sessionTimer.subscribe(() => {
         if (!sessionTimer.hasPaidAccess() && !this.isRemotePlayer && !this.canActAsHost()) {
+          if (this.hostCode || this.isHost) {
+            this.clearPaidHostCode();
+          }
+        }
+      });
+
+      authService.onLogin((user) => {
+        if (this.canActAsHost()) {
+          this.resetHostCodeForNewLogin(user.name);
+        }
+      });
+
+      authService.subscribe(() => {
+        const user = authService.getCurrentUser();
+        if (!user.isAuthenticated && !ownerControl.isUnlocked() && !this.isRemotePlayer) {
           if (this.hostCode || this.isHost) {
             this.clearPaidHostCode();
           }
@@ -211,7 +230,14 @@ class RemoteBingoService {
     return key;
   }
 
-  private generateRandomCode(): string {
+  private generateRandomCode(excludeCode?: string): string {
+    const cleanExclude = (excludeCode || '').trim().toUpperCase();
+    for (let i = 0; i < 25; i++) {
+      const candidate = Math.floor(1000 + Math.random() * 9000).toString();
+      if (!cleanExclude || candidate !== cleanExclude) {
+        return candidate;
+      }
+    }
     return Math.floor(1000 + Math.random() * 9000).toString();
   }
 
@@ -275,7 +301,7 @@ class RemoteBingoService {
   }
 
   private rotateCodeAfterCollision(): string {
-    const newCode = this.generateRandomCode();
+    const newCode = this.generateRandomCode(this.hostCode);
     this.hostCode = newCode;
     this.codeLockedForRound = true;
     this.lastCloudSyncSignature = '';
@@ -284,8 +310,10 @@ class RemoteBingoService {
       this.currentRoomCode = newCode;
     }
     if (typeof window !== 'undefined') {
-      localStorage.setItem(STORAGE_KEY_HOST_CODE, newCode);
-      localStorage.setItem(STORAGE_KEY_ROUND_LOCKED, '1');
+      localStorage.removeItem(STORAGE_KEY_HOST_CODE);
+      localStorage.removeItem(STORAGE_KEY_ROUND_LOCKED);
+      sessionStorage.setItem(STORAGE_KEY_HOST_CODE, newCode);
+      sessionStorage.setItem(STORAGE_KEY_ROUND_LOCKED, '1');
     }
     if (this.isHost) {
       const hostKey = this.getOrCreateHostKey();
@@ -500,14 +528,25 @@ class RemoteBingoService {
     socialSocket.on('bingo:new_round', (payload: any) => {
       if (!payload || typeof payload !== 'object') return;
       const nextRound = Number(payload.roundNumber) || this.roundNumber + 1;
+      const incomingNewCode = String(payload.newRoomCode || payload.roomCode || '')
+        .trim()
+        .toUpperCase()
+        .replace(/[^A-Z0-9]/g, '');
+      const prevCode = this.hostCode || this.currentRoomCode || '';
+      if (incomingNewCode && incomingNewCode.length >= 3 && incomingNewCode !== prevCode) {
+        this.applyRotatedRoomCode(prevCode, incomingNewCode);
+      }
       this.roundNumber = nextRound;
       this.calledBallNumbersCache = [];
       this.claimedMilestones = [];
       this.milestoneWinners = {};
       this.lastCloudSyncSignature = '';
+      const effectiveCode = incomingNewCode || this.currentRoomCode || this.hostCode || '';
       if (this.tvState) {
         this.tvState = {
           ...this.tvState,
+          roomId: effectiveCode ? `joy-bingo-${effectiveCode}` : this.tvState.roomId,
+          roomCode: this.isTvViewerMode && !this.tvState.showCodeOnScreen ? '' : effectiveCode,
           roundNumber: nextRound,
           calledBalls: [],
           lastClaim: null,
@@ -518,7 +557,7 @@ class RemoteBingoService {
         this.tvStateListeners.forEach((fn) => fn(this.tvState!));
       }
       const ev: BingoNewRoundEvent = {
-        roomCode: String(payload.roomCode || this.currentRoomCode || this.hostCode || ''),
+        roomCode: effectiveCode,
         roundNumber: nextRound,
         winnerName: payload.winnerName ? String(payload.winnerName) : undefined,
         reason: payload.reason === 'host' ? 'host' : 'fullbrett',
@@ -684,8 +723,15 @@ class RemoteBingoService {
         .then((r) => (r.ok ? r.json() : null))
         .then((st) => {
           if (!st || !st.valid || (this.currentRoomCode !== cleanCode && this.hostCode !== cleanCode)) return;
-          if (typeof st.roundNumber === 'number' && st.roundNumber > this.roundNumber) {
-            this.roundNumber = st.roundNumber;
+          const migratedCode = st.migratedToCode
+            ? String(st.migratedToCode).trim().toUpperCase().replace(/[^A-Z0-9]/g, '')
+            : '';
+          const effectiveCode = migratedCode || cleanCode;
+          if (migratedCode && migratedCode !== cleanCode) {
+            this.applyRotatedRoomCode(cleanCode, migratedCode);
+          }
+          if ((typeof st.roundNumber === 'number' && st.roundNumber > this.roundNumber) || (migratedCode && migratedCode !== cleanCode)) {
+            this.roundNumber = Number(st.roundNumber) || this.roundNumber + 1;
             this.calledBallNumbersCache = [];
             this.claimedMilestones = Array.isArray(st.claimedMilestones) ? st.claimedMilestones : [];
             this.milestoneWinners =
@@ -693,8 +739,8 @@ class RemoteBingoService {
             this.lastCloudSyncSignature = '';
             this.newRoundListeners.forEach((fn) =>
               fn({
-                roomCode: cleanCode,
-                roundNumber: st.roundNumber,
+                roomCode: effectiveCode,
+                roundNumber: this.roundNumber,
                 reason: 'fullbrett',
                 timestamp: Date.now(),
               })
@@ -827,10 +873,12 @@ class RemoteBingoService {
     }
     if (!this.hostCode || this.hostCode.length < 3) {
       if (typeof window !== 'undefined') {
-        const savedHost = localStorage.getItem(STORAGE_KEY_HOST_CODE);
+        localStorage.removeItem(STORAGE_KEY_HOST_CODE);
+        localStorage.removeItem(STORAGE_KEY_ROUND_LOCKED);
+        const savedHost = sessionStorage.getItem(STORAGE_KEY_HOST_CODE);
         if (savedHost && savedHost.length >= 3) {
           this.hostCode = savedHost;
-          this.codeLockedForRound = localStorage.getItem(STORAGE_KEY_ROUND_LOCKED) === '1';
+          this.codeLockedForRound = sessionStorage.getItem(STORAGE_KEY_ROUND_LOCKED) === '1';
         }
       }
     }
@@ -838,14 +886,14 @@ class RemoteBingoService {
       this.hostCode = this.generateRandomCode();
       this.codeLockedForRound = true;
       if (typeof window !== 'undefined') {
-        localStorage.setItem(STORAGE_KEY_HOST_CODE, this.hostCode);
-        localStorage.setItem(STORAGE_KEY_ROUND_LOCKED, '1');
+        sessionStorage.setItem(STORAGE_KEY_HOST_CODE, this.hostCode);
+        sessionStorage.setItem(STORAGE_KEY_ROUND_LOCKED, '1');
       }
       this.notify();
     } else if (!this.codeLockedForRound) {
       this.codeLockedForRound = true;
       if (typeof window !== 'undefined') {
-        localStorage.setItem(STORAGE_KEY_ROUND_LOCKED, '1');
+        sessionStorage.setItem(STORAGE_KEY_ROUND_LOCKED, '1');
       }
       this.notify();
     }
@@ -857,21 +905,170 @@ class RemoteBingoService {
     this.codeLockedForRound = false;
     if (typeof window !== 'undefined') {
       localStorage.removeItem(STORAGE_KEY_ROUND_LOCKED);
+      sessionStorage.removeItem(STORAGE_KEY_ROUND_LOCKED);
     }
     this.notify();
   }
 
-  public startNewRound(): string {
+  public resetHostCodeForNewLogin(hostProfileName?: string): string {
     if (!this.canActAsHost()) return '';
-    this.codeLockedForRound = false;
+    const oldCode = this.hostCode || this.currentRoomCode || '';
+    const hostKey = this.getOrCreateHostKey();
+    if (hostProfileName && hostProfileName.trim() && hostProfileName.trim() !== 'Gjest') {
+      this.hostName = hostProfileName.trim();
+      if (typeof window !== 'undefined') {
+        localStorage.setItem(STORAGE_KEY_HOST_NAME, this.hostName);
+      }
+      socialSocket.updateProfile(this.hostName);
+    }
+    if (oldCode && typeof window !== 'undefined') {
+      fetch('/api/rooms/unregister', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'all', roomCode: oldCode, hostKey }),
+      }).catch(() => {});
+      socialSocket.send('bingo:host_leave', { roomCode: oldCode, hostKey });
+      void firebasePersistence.deleteActiveRoom(oldCode);
+    }
+    const freshCode = this.generateRandomCode(oldCode);
+    this.hostCode = freshCode;
+    this.serverActiveCode = '';
+    this.codeLockedForRound = true;
     this.calledBallNumbersCache = [];
     this.claimedMilestones = [];
     this.milestoneWinners = {};
     this.lastCloudSyncSignature = '';
+    this.seenParticipantIds.clear();
+    this.seenClaimIds.clear();
+    this.remoteParticipants = [];
     if (typeof window !== 'undefined') {
+      localStorage.removeItem(STORAGE_KEY_HOST_CODE);
       localStorage.removeItem(STORAGE_KEY_ROUND_LOCKED);
+      sessionStorage.setItem(STORAGE_KEY_HOST_CODE, freshCode);
+      sessionStorage.setItem(STORAGE_KEY_ROUND_LOCKED, '1');
     }
-    return this.generateNewHostCode();
+    if (this.isHost) {
+      this.activateHostSession(freshCode, this.hostName, true);
+    } else {
+      this.notify();
+    }
+    return freshCode;
+  }
+
+  public rotateHostCodeLocalForRound(excludePrevCode?: string): { prevCode: string; newCode: string } {
+    if (!this.canActAsHost()) return { prevCode: '', newCode: '' };
+    const prevCode = (excludePrevCode || this.hostCode || this.currentRoomCode || '').trim().toUpperCase();
+    const newCode = this.generateRandomCode(prevCode);
+    this.hostCode = newCode;
+    this.codeLockedForRound = true;
+    this.calledBallNumbersCache = [];
+    this.claimedMilestones = [];
+    this.milestoneWinners = {};
+    this.lastCloudSyncSignature = '';
+    if (this.isHost) {
+      this.currentRoomCode = newCode;
+    }
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem(STORAGE_KEY_HOST_CODE);
+      localStorage.removeItem(STORAGE_KEY_ROUND_LOCKED);
+      sessionStorage.setItem(STORAGE_KEY_HOST_CODE, newCode);
+      sessionStorage.setItem(STORAGE_KEY_ROUND_LOCKED, '1');
+      if (prevCode && prevCode !== newCode) {
+        void firebasePersistence.deleteActiveRoom(prevCode);
+      }
+    }
+    this.notify();
+    return { prevCode, newCode };
+  }
+
+  public finishHostCodeRotationToRoom(newCode: string) {
+    if (!this.canActAsHost() || !newCode) return;
+    const cleanNew = newCode.trim().toUpperCase();
+    this.hostCode = cleanNew;
+    this.serverActiveCode = cleanNew;
+    if (this.isHost) {
+      this.currentRoomCode = cleanNew;
+      socialSocket.connect(`joy-bingo-${cleanNew}`);
+      this.startRoomStatePolling(cleanNew);
+      void this.syncRoomToFirestore(cleanNew, this.lastActiveGameCache, true, this.lastEditionCache);
+    }
+    this.notify();
+  }
+
+  public applyRotatedRoomCode(oldCode: string, newCode: string) {
+    const cleanNew = newCode.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+    const cleanOld = oldCode.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+    if (!cleanNew || cleanNew.length < 3) return;
+
+    if (this.isHost && this.canActAsHost()) {
+      const changed = this.hostCode !== cleanNew;
+      this.hostCode = cleanNew;
+      this.currentRoomCode = cleanNew;
+      this.codeLockedForRound = true;
+      this.serverActiveCode = cleanNew;
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem(STORAGE_KEY_HOST_CODE);
+        localStorage.removeItem(STORAGE_KEY_ROUND_LOCKED);
+        sessionStorage.setItem(STORAGE_KEY_HOST_CODE, cleanNew);
+        sessionStorage.setItem(STORAGE_KEY_ROUND_LOCKED, '1');
+        if (cleanOld && cleanOld !== cleanNew) {
+          void firebasePersistence.deleteActiveRoom(cleanOld);
+        }
+      }
+      if (changed) {
+        socialSocket.connect(`joy-bingo-${cleanNew}`);
+        this.startRoomStatePolling(cleanNew);
+        void this.syncRoomToFirestore(cleanNew, this.lastActiveGameCache, true, this.lastEditionCache);
+      }
+    } else if (this.isRemotePlayer) {
+      const changed = this.currentRoomCode !== cleanNew;
+      this.currentRoomCode = cleanNew;
+      if (changed) {
+        socialSocket.connect(`joy-bingo-${cleanNew}`);
+        this.attachRemoteBingoCloudSync(cleanNew);
+        this.startRoomStatePolling(cleanNew);
+      }
+    }
+
+    if (this.isTvViewerMode) {
+      this.attachRemoteBingoCloudSync(cleanNew);
+      if (this.tvState) {
+        this.tvState = {
+          ...this.tvState,
+          roomId: `joy-bingo-${cleanNew}`,
+          roomCode: this.tvState.showCodeOnScreen !== false ? cleanNew : '',
+        };
+        this.tvStateListeners.forEach((fn) => fn(this.tvState!));
+      }
+    }
+    this.notify();
+  }
+
+  public startNewRound(winnerName?: string): string {
+    if (!this.canActAsHost()) return '';
+    const { prevCode, newCode } = this.rotateHostCodeLocalForRound();
+    if (!newCode) return '';
+    const hostKey = this.getOrCreateHostKey();
+    if (prevCode) {
+      socialSocket.send('bingo:start_new_round', {
+        roomCode: prevCode,
+        newRoomCode: newCode,
+        hostKey,
+        winnerName,
+      });
+      if (typeof window !== 'undefined') {
+        fetch('/api/rooms/bingo/new_round', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ roomCode: prevCode, newRoomCode: newCode, hostKey, winnerName }),
+        }).catch(() => {});
+      }
+    }
+    this.finishHostCodeRotationToRoom(newCode);
+    if (!this.isHost) {
+      this.activateHostSession(newCode, this.hostName, true);
+    }
+    return newCode;
   }
 
   public clearPaidHostCode() {
@@ -897,6 +1094,8 @@ class RemoteBingoService {
     if (typeof window !== 'undefined') {
       localStorage.removeItem(STORAGE_KEY_HOST_CODE);
       localStorage.removeItem(STORAGE_KEY_ROUND_LOCKED);
+      sessionStorage.removeItem(STORAGE_KEY_HOST_CODE);
+      sessionStorage.removeItem(STORAGE_KEY_ROUND_LOCKED);
       if (oldCode) {
         fetch('/api/rooms/unregister', {
           method: 'POST',
@@ -929,13 +1128,15 @@ class RemoteBingoService {
       socialSocket.send('bingo:host_leave', { roomCode: oldCode, hostKey });
       void firebasePersistence.deleteActiveRoom(oldCode);
     }
-    this.hostCode = this.generateRandomCode();
+    this.hostCode = this.generateRandomCode(oldCode);
     this.codeLockedForRound = true;
     this.calledBallNumbersCache = [];
     this.lastCloudSyncSignature = '';
     if (typeof window !== 'undefined') {
-      localStorage.setItem(STORAGE_KEY_HOST_CODE, this.hostCode);
-      localStorage.setItem(STORAGE_KEY_ROUND_LOCKED, '1');
+      localStorage.removeItem(STORAGE_KEY_HOST_CODE);
+      localStorage.removeItem(STORAGE_KEY_ROUND_LOCKED);
+      sessionStorage.setItem(STORAGE_KEY_HOST_CODE, this.hostCode);
+      sessionStorage.setItem(STORAGE_KEY_ROUND_LOCKED, '1');
     }
     if (this.isHost) {
       this.activateHostSession(this.hostCode);
@@ -953,8 +1154,10 @@ class RemoteBingoService {
     this.codeLockedForRound = true;
     this.lastCloudSyncSignature = '';
     if (typeof window !== 'undefined') {
-      localStorage.setItem(STORAGE_KEY_HOST_CODE, this.hostCode);
-      localStorage.setItem(STORAGE_KEY_ROUND_LOCKED, '1');
+      localStorage.removeItem(STORAGE_KEY_HOST_CODE);
+      localStorage.removeItem(STORAGE_KEY_ROUND_LOCKED);
+      sessionStorage.setItem(STORAGE_KEY_HOST_CODE, this.hostCode);
+      sessionStorage.setItem(STORAGE_KEY_ROUND_LOCKED, '1');
     }
     if (this.isHost) {
       this.activateHostSession(this.hostCode);
@@ -1380,30 +1583,9 @@ class RemoteBingoService {
     this.notify();
   }
 
-  public broadcastRoundResetToRoom(winnerName?: string) {
-    if (!this.canActAsHost()) return;
-    const hostKey = this.getOrCreateHostKey();
-    const activeCode = this.hostCode || this.currentRoomCode || '';
-    this.calledBallNumbersCache = [];
-    this.claimedMilestones = [];
-    this.milestoneWinners = {};
-    this.lastCloudSyncSignature = '';
-    if (activeCode) {
-      socialSocket.send('bingo:start_new_round', {
-        roomCode: activeCode,
-        hostKey,
-        winnerName,
-      });
-      if (typeof window !== 'undefined') {
-        fetch('/api/rooms/bingo/new_round', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ roomCode: activeCode, hostKey, winnerName }),
-        }).catch(() => {});
-      }
-      void this.syncRoomToFirestore(activeCode, 'bingo', true);
-    }
-    this.notify();
+  public broadcastRoundResetToRoom(winnerName?: string): string {
+    if (!this.canActAsHost()) return '';
+    return this.startNewRound(winnerName);
   }
 
   public sendRemotePlayerProgress(data: {
@@ -1462,8 +1644,15 @@ class RemoteBingoService {
         .then((r) => (r.ok ? r.json() : null))
         .then((st) => {
           if (!st || !st.valid) return;
-          if (typeof st.roundNumber === 'number' && st.roundNumber > this.roundNumber) {
-            this.roundNumber = st.roundNumber;
+          const migratedCode = st.migratedToCode
+            ? String(st.migratedToCode).trim().toUpperCase().replace(/[^A-Z0-9]/g, '')
+            : '';
+          const effectiveCode = migratedCode || activeCode;
+          if (migratedCode && migratedCode !== activeCode) {
+            this.applyRotatedRoomCode(activeCode, migratedCode);
+          }
+          if ((typeof st.roundNumber === 'number' && st.roundNumber > this.roundNumber) || (migratedCode && migratedCode !== activeCode)) {
+            this.roundNumber = Number(st.roundNumber) || this.roundNumber + 1;
             this.calledBallNumbersCache = [];
             this.claimedMilestones = Array.isArray(st.claimedMilestones) ? st.claimedMilestones : [];
             this.milestoneWinners =
@@ -1471,8 +1660,8 @@ class RemoteBingoService {
             this.lastCloudSyncSignature = '';
             this.newRoundListeners.forEach((fn) =>
               fn({
-                roomCode: activeCode,
-                roundNumber: st.roundNumber,
+                roomCode: effectiveCode,
+                roundNumber: this.roundNumber,
                 reason: 'fullbrett',
                 timestamp: Date.now(),
               })

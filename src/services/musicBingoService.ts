@@ -82,6 +82,7 @@ class MusicBingoService {
   private lastRecordedClaimTs: number = 0;
   private clockOffsetMs = 0;
   private statePollTimer: ReturnType<typeof setInterval> | null = null;
+  private pollingCode: string = '';
 
   constructor() {
     if (typeof window !== 'undefined') {
@@ -114,9 +115,12 @@ class MusicBingoService {
 
       socialSocket.on('music:new_round', (payload: unknown) => {
         if (payload && typeof payload === 'object') {
-          const data = payload as Partial<MusicBingoNewRoundEvent>;
+          const data = payload as Partial<MusicBingoNewRoundEvent> & { newRoomCode?: string };
+          const incomingCode = String(data.newRoomCode || data.roomCode || this.snapshot.roomCode || '')
+            .trim()
+            .toUpperCase();
           this.handleIncomingNewRound({
-            roomCode: String(data.roomCode || this.snapshot.roomCode || ''),
+            roomCode: incomingCode,
             roundNumber: Number(data.roundNumber) || (this.snapshot.roundNumber || 1) + 1,
             winnerName: data.winnerName ? String(data.winnerName) : undefined,
             reason: data.reason === 'host' ? 'host' : 'fullbrett',
@@ -217,12 +221,25 @@ class MusicBingoService {
   }
 
   private handleIncomingNewRound(ev: MusicBingoNewRoundEvent) {
-    if (ev.roundNumber <= this.snapshot.roundNumber && this.snapshot.playedSongIds.length === 0 && this.snapshot.claimedMilestones.length === 0) {
+    const prevCode = (this.snapshot.roomCode || remoteBingo.getHostCode() || remoteBingo.getCurrentRoomCode() || '')
+      .trim()
+      .toUpperCase();
+    const nextCode = (ev.roomCode || prevCode).trim().toUpperCase();
+    const codeChanged = Boolean(nextCode && prevCode && nextCode !== prevCode);
+    if (codeChanged) {
+      remoteBingo.applyRotatedRoomCode(prevCode, nextCode);
+    }
+    if (
+      !codeChanged &&
+      ev.roundNumber <= this.snapshot.roundNumber &&
+      this.snapshot.playedSongIds.length === 0 &&
+      this.snapshot.claimedMilestones.length === 0
+    ) {
       return;
     }
     this.snapshot = {
       ...this.snapshot,
-      roomCode: ev.roomCode || this.snapshot.roomCode,
+      roomCode: nextCode || this.snapshot.roomCode,
       roundNumber: ev.roundNumber,
       playedSongIds: [],
       currentSongId: null,
@@ -238,15 +255,22 @@ class MusicBingoService {
         hasBingo: false,
       })),
     };
+    if (nextCode && nextCode !== this.pollingCode) {
+      this.stopStatePolling();
+      this.startStatePolling(nextCode);
+    }
     this.notify();
-    this.newRoundListeners.forEach((fn) => fn(ev));
+    this.newRoundListeners.forEach((fn) => fn({ ...ev, roomCode: nextCode || ev.roomCode }));
   }
 
-  private applyServerState(incoming: Partial<MusicBingoSnapshot>) {
+  private applyServerState(incoming: Partial<MusicBingoSnapshot>, explicitNewCode?: string) {
     if (typeof incoming.serverNow === 'number' && incoming.serverNow > 0) {
       this.clockOffsetMs = incoming.serverNow - Date.now();
     }
     const prevRound = this.snapshot.roundNumber || 1;
+    const prevCode = (this.snapshot.roomCode || remoteBingo.getHostCode() || remoteBingo.getCurrentRoomCode() || '')
+      .trim()
+      .toUpperCase();
     const incomingRound = typeof incoming.roundNumber === 'number' ? incoming.roundNumber : prevRound;
 
     if (Array.isArray(incoming.participants)) {
@@ -258,7 +282,11 @@ class MusicBingoService {
       });
     }
 
-    const roomCode = incoming.roomCode || this.snapshot.roomCode;
+    const roomCode = (explicitNewCode || incoming.roomCode || this.snapshot.roomCode || '').trim().toUpperCase();
+    const codeRotated = Boolean(roomCode && prevCode && roomCode !== prevCode);
+    if (codeRotated) {
+      remoteBingo.applyRotatedRoomCode(prevCode, roomCode);
+    }
     if (roomCode) {
       this.startStatePolling(roomCode);
     }
@@ -266,6 +294,7 @@ class MusicBingoService {
     this.snapshot = {
       ...this.snapshot,
       ...incoming,
+      roomCode: roomCode || this.snapshot.roomCode,
       playedSongIds: Array.isArray(incoming.playedSongIds)
         ? incoming.playedSongIds
         : this.snapshot.playedSongIds,
@@ -282,7 +311,7 @@ class MusicBingoService {
     };
     this.notify();
 
-    if (incomingRound > prevRound) {
+    if (incomingRound > prevRound || codeRotated) {
       this.newRoundListeners.forEach((fn) =>
         fn({
           roomCode: roomCode || '',
@@ -301,9 +330,12 @@ class MusicBingoService {
   private startStatePolling(roomCode: string) {
     if (typeof window === 'undefined') return;
     const clean = this.resolveRoomCode(roomCode);
-    if (!clean || this.statePollTimer) return;
+    if (!clean) return;
+    if (this.statePollTimer && this.pollingCode === clean) return;
+    this.stopStatePolling();
+    this.pollingCode = clean;
     this.statePollTimer = setInterval(() => {
-      const activeCode = this.resolveRoomCode();
+      const activeCode = this.pollingCode || this.resolveRoomCode();
       if (!activeCode) {
         this.stopStatePolling();
         return;
@@ -311,8 +343,14 @@ class MusicBingoService {
       fetch(`/api/rooms/state?code=${encodeURIComponent(activeCode)}`, { cache: 'no-store' })
         .then((res) => (res.ok ? res.json() : null))
         .then((data) => {
+          const migrated = data?.migratedToCode
+            ? String(data.migratedToCode).trim().toUpperCase()
+            : '';
           if (data?.musicSnapshot && typeof data.musicSnapshot === 'object') {
-            this.applyServerState(data.musicSnapshot as Partial<MusicBingoSnapshot>);
+            this.applyServerState(data.musicSnapshot as Partial<MusicBingoSnapshot>, migrated || undefined);
+          } else if (migrated && migrated !== activeCode) {
+            remoteBingo.applyRotatedRoomCode(activeCode, migrated);
+            this.startStatePolling(migrated);
           }
         })
         .catch(() => {});
@@ -324,6 +362,7 @@ class MusicBingoService {
       clearInterval(this.statePollTimer);
       this.statePollTimer = null;
     }
+    this.pollingCode = '';
   }
 
   public getSnapshot(): MusicBingoSnapshot {
@@ -455,18 +494,14 @@ class MusicBingoService {
   public startNewRound(winnerName?: string) {
     if (!remoteBingo.canActAsHost()) return;
     const nextRound = (this.snapshot.roundNumber || 1) + 1;
-    const code = this.resolveRoomCode();
+    const { prevCode, newCode } = remoteBingo.rotateHostCodeLocalForRound(this.resolveRoomCode());
+    const effectivePrev = prevCode || this.resolveRoomCode();
+    const effectiveNew = newCode || effectivePrev;
     const hostKey = remoteBingo.getHostKeyForService();
-    this.handleIncomingNewRound({
-      roomCode: code,
-      roundNumber: nextRound,
-      winnerName,
-      reason: 'host',
-      timestamp: Date.now(),
-    });
-    if (code) {
+    if (effectivePrev) {
       socialSocket.send('music:new_round', {
-        roomCode: code,
+        roomCode: effectivePrev,
+        newRoomCode: effectiveNew,
         hostKey,
         roundNumber: nextRound,
         winnerName,
@@ -475,10 +510,25 @@ class MusicBingoService {
         fetch('/api/rooms/music/new_round', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ roomCode: code, hostKey, winnerName }),
+          body: JSON.stringify({
+            roomCode: effectivePrev,
+            newRoomCode: effectiveNew,
+            hostKey,
+            winnerName,
+          }),
         }).catch(() => {});
       }
     }
+    if (effectiveNew) {
+      remoteBingo.finishHostCodeRotationToRoom(effectiveNew);
+    }
+    this.handleIncomingNewRound({
+      roomCode: effectiveNew,
+      roundNumber: nextRound,
+      winnerName,
+      reason: 'host',
+      timestamp: Date.now(),
+    });
     this.pushHostState();
   }
 
@@ -500,8 +550,12 @@ class MusicBingoService {
       fetch(`/api/rooms/state?code=${encodeURIComponent(code)}`, { cache: 'no-store' })
         .then((res) => (res.ok ? res.json() : null))
         .then((data) => {
+          const migrated = data?.migratedToCode ? String(data.migratedToCode).trim().toUpperCase() : '';
           if (data?.musicSnapshot && typeof data.musicSnapshot === 'object') {
-            this.applyServerState(data.musicSnapshot as Partial<MusicBingoSnapshot>);
+            this.applyServerState(data.musicSnapshot as Partial<MusicBingoSnapshot>, migrated || undefined);
+          } else if (migrated && migrated !== code) {
+            remoteBingo.applyRotatedRoomCode(code, migrated);
+            this.startStatePolling(migrated);
           }
         })
         .catch(() => {});

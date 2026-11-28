@@ -129,6 +129,7 @@ class QuizService {
   private myPlayerName: string = '';
   private joinedRoomCode: string = '';
   private hostRoomCode: string = '';
+  private tvWatchCode: string = '';
   private hostEdition: QuizEdition = 'adult';
   private hostTeams: QuizTeamDef[] = DEFAULT_QUIZ_TEAMS.map((t) => ({ ...t }));
   private lastError: string | null = null;
@@ -228,6 +229,21 @@ class QuizService {
       this.clockOffsetMs = next.serverNow - Date.now();
     }
     const showCode = next.showCodeOnScreen !== false;
+    const incomingRealCode = String(next.roomCode || '').trim().toUpperCase();
+    if (incomingRealCode && incomingRealCode.length >= 3) {
+      if (this.isRemoteParticipant && this.joinedRoomCode && incomingRealCode !== this.joinedRoomCode) {
+        const prev = this.joinedRoomCode;
+        this.joinedRoomCode = incomingRealCode;
+        socialSocket.connect(`joy-quiz-${incomingRealCode}`);
+        this.attachRemoteQuizCloudSync(incomingRealCode);
+        remoteBingo.applyRotatedRoomCode(prev, incomingRealCode);
+      } else if (this.isTvViewerMode && this.tvWatchCode && incomingRealCode !== this.tvWatchCode) {
+        const prev = this.tvWatchCode;
+        this.tvWatchCode = incomingRealCode;
+        this.attachRemoteQuizCloudSync(incomingRealCode);
+        remoteBingo.applyRotatedRoomCode(prev, incomingRealCode);
+      }
+    }
     const sanitizedNext: QuizRoomSnapshot =
       this.isTvViewerMode && !showCode
         ? { ...next, showCodeOnScreen: false, roomCode: '' }
@@ -463,17 +479,41 @@ class QuizService {
   }
 
   public switchEdition(edition: QuizEdition) {
+    this.performHostQuizReset(edition);
+  }
+
+  private performHostQuizReset(targetEdition: QuizEdition) {
     if (!this.getIsHost()) return;
-    this.hostEdition = edition;
-    const questions = getQuestionsForEdition(edition);
+    this.hostEdition = targetEdition;
+    const questions = getQuestionsForEdition(targetEdition);
     const hostKey = remoteBingo.getHostKeyForService();
-    const roomCode = this.resolveActiveRoomCode();
-    socialSocket.send('quiz:reset_game', { roomCode, edition, hostKey });
+    const currentCode = this.resolveActiveRoomCode();
+    const { prevCode, newCode } = remoteBingo.rotateHostCodeLocalForRound(currentCode);
+    const effectivePrev = prevCode || currentCode;
+    const effectiveNew = newCode || effectivePrev;
+
+    if (effectivePrev) {
+      socialSocket.send('quiz:reset_game', {
+        roomCode: effectivePrev,
+        newRoomCode: effectiveNew,
+        edition: targetEdition,
+        hostKey,
+      });
+    }
+
+    if (effectiveNew) {
+      this.hostRoomCode = effectiveNew;
+      socialSocket.connect(`joy-quiz-${effectiveNew}`);
+      remoteBingo.finishHostCodeRotationToRoom(effectiveNew);
+      remoteBingo.notifyQuizHosted(effectiveNew, targetEdition);
+    }
 
     if (this.snapshot) {
       this.broadcastLocalFallback({
         ...this.snapshot,
-        edition,
+        roomId: effectiveNew ? `joy-quiz-${effectiveNew}` : this.snapshot.roomId,
+        roomCode: effectiveNew || this.snapshot.roomCode,
+        edition: targetEdition,
         phase: 'lobby',
         questionIndex: 0,
         totalQuestions: questions.length,
@@ -687,6 +727,7 @@ class QuizService {
     this.isHost = false;
     this.isRemoteParticipant = false;
     this.isTvViewerMode = true;
+    this.tvWatchCode = cleanCode;
     const roomId = `joy-quiz-${cleanCode}`;
     this.attachRemoteQuizCloudSync(cleanCode);
     socialSocket.connectAsTvViewer(roomId, () => {
@@ -707,6 +748,7 @@ class QuizService {
 
   public exitTvWatch() {
     this.isTvViewerMode = false;
+    this.tvWatchCode = '';
     this.stopRemoteQuizSubscription();
     socialSocket.exitTvMode();
     this.notify();
@@ -945,10 +987,7 @@ class QuizService {
   public resetGame(edition?: QuizEdition) {
     if (!this.getIsHost()) return;
     const targetEdition = edition || this.getHostEdition();
-    const hostKey = remoteBingo.getHostKeyForService();
-    const roomCode = this.resolveActiveRoomCode();
-    remoteBingo.unlockCodeForNewRound();
-    socialSocket.send('quiz:reset_game', { roomCode, edition: targetEdition, hostKey });
+    this.performHostQuizReset(targetEdition);
   }
 
   public async validateAndJoinQuizWithCode(

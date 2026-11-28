@@ -4,6 +4,7 @@
  */
 
 import { i18n, SupportedLanguage, SUPPORTED_LANGUAGES } from '../services/i18n';
+import { formatBingoBallSpeech } from './bingoSpeechText';
 
 export interface PauseTrack {
   id: string;
@@ -71,6 +72,7 @@ class SoundEngine {
 
   // Web Speech Synthesis reliability & voice matching state
   private cachedVoices: SpeechSynthesisVoice[] = [];
+  private failedVoiceURIs: Set<string> = new Set();
   private currentUtterance: SpeechSynthesisUtterance | null = null;
   private speechDispatchTimer: number | null = null;
   private speechSequence: number = 0;
@@ -91,6 +93,32 @@ class SoundEngine {
       };
       refreshVoices();
       window.speechSynthesis.addEventListener?.('voiceschanged', refreshVoices);
+    }
+
+    try {
+      i18n.subscribe(() => {
+        this.cancelSpeech();
+      });
+    } catch {
+      // ignore
+    }
+  }
+
+  public cancelSpeech() {
+    this.lastSpokenBallKey = '';
+    this.lastSpokenBallAt = 0;
+    this.speechSequence++;
+    if (this.speechDispatchTimer !== null && typeof window !== 'undefined') {
+      window.clearTimeout(this.speechDispatchTimer);
+      this.speechDispatchTimer = null;
+    }
+    this.currentUtterance = null;
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      try {
+        window.speechSynthesis.cancel();
+      } catch {
+        // ignore
+      }
     }
   }
 
@@ -662,54 +690,95 @@ class SoundEngine {
     return SUPPORTED_LANGUAGES.find((l) => l.code === lang)?.speechLocale || 'nb-NO';
   }
 
-  private selectVoiceForLanguage(lang: SupportedLanguage, speechLocale: string): SpeechSynthesisVoice | null {
-    if (typeof window === 'undefined' || !('speechSynthesis' in window)) return null;
+  private getAvailableVoices(): SpeechSynthesisVoice[] {
+    if (typeof window === 'undefined' || !('speechSynthesis' in window)) return [];
     try {
       const freshVoices = window.speechSynthesis.getVoices();
-      const voices = freshVoices.length > 0 ? freshVoices : this.cachedVoices;
-      if (freshVoices.length > 0) this.cachedVoices = freshVoices;
-      if (!voices || voices.length === 0) return null;
-
-      const exactCandidates: Record<SupportedLanguage, string[]> = {
-        nb: ['nb-no', 'no-no', 'nn-no', 'nb', 'no'],
-        en: ['en-us', 'en-gb', 'en-au', 'en'],
-        sv: ['sv-se', 'sv-fi', 'sv'],
-        de: ['de-de', 'de-at', 'de-ch', 'de'],
-        es: ['es-es', 'es-mx', 'es-us', 'es-419', 'es'],
-        fr: ['fr-fr', 'fr-ca', 'fr-be', 'fr'],
-        ar: ['ar-sa', 'ar-eg', 'ar-ae', 'ar'],
-        ti: ['ti-et', 'ti-er', 'ti'],
-      };
-
-      const prefixCandidates: Record<SupportedLanguage, string[]> = {
-        nb: ['nb', 'no', 'nn'],
-        en: ['en'],
-        sv: ['sv'],
-        de: ['de'],
-        es: ['es'],
-        fr: ['fr'],
-        ar: ['ar'],
-        ti: ['ti'],
-      };
-
-      const exactList = [speechLocale.toLowerCase(), ...(exactCandidates[lang] || [])];
-      for (const candidate of exactList) {
-        const match = voices.find((v) => v.lang.toLowerCase() === candidate);
-        if (match) return match;
+      if (freshVoices && freshVoices.length > 0) {
+        this.cachedVoices = freshVoices;
+        return freshVoices;
       }
-
-      const prefixes = prefixCandidates[lang] || [lang];
-      for (const prefix of prefixes) {
-        const match = voices.find((v) => {
-          const vl = v.lang.toLowerCase();
-          return vl === prefix || vl.startsWith(`${prefix}-`) || vl.startsWith(`${prefix}_`);
-        });
-        if (match) return match;
-      }
+      return this.cachedVoices;
     } catch {
-      // ignore voice lookup failures
+      return this.cachedVoices;
     }
-    return null;
+  }
+
+  private selectVoiceForLanguage(lang: SupportedLanguage, speechLocale: string): {
+    voice: SpeechSynthesisVoice | null;
+    voicesLoaded: boolean;
+  } {
+    const voices = this.getAvailableVoices();
+    if (!voices || voices.length === 0) {
+      return { voice: null, voicesLoaded: false };
+    }
+
+    const exactCandidates: Record<SupportedLanguage, string[]> = {
+      nb: ['nb-no', 'no-no', 'nn-no', 'nb', 'no', 'nn', 'nob-nor', 'nor-nor', 'nno-nor', 'nob', 'nor', 'nno'],
+      en: ['en-us', 'en-gb', 'en-au', 'en-ca', 'en-ie', 'en-nz', 'en', 'eng-usa', 'eng-gbr', 'eng'],
+      sv: ['sv-se', 'sv-fi', 'sv', 'swe-swe', 'swe'],
+      de: ['de-de', 'de-at', 'de-ch', 'de', 'deu-deu', 'deu', 'ger'],
+      es: ['es-es', 'es-mx', 'es-us', 'es-419', 'es', 'spa-esp', 'spa'],
+      fr: ['fr-fr', 'fr-ca', 'fr-be', 'fr-ch', 'fr', 'fra-fra', 'fra', 'fre'],
+      ar: ['ar-sa', 'ar-eg', 'ar-ae', 'ar-ma', 'ar-jo', 'ar-lb', 'ar', 'ara-sau', 'ara'],
+      ti: ['ti-et', 'ti-er', 'ti', 'tir-eth', 'tir-eri', 'tir'],
+    };
+
+    const prefixCandidates: Record<SupportedLanguage, string[]> = {
+      nb: ['nb', 'no', 'nn', 'nob', 'nor', 'nno'],
+      en: ['en', 'eng'],
+      sv: ['sv', 'swe'],
+      de: ['de', 'deu', 'ger'],
+      es: ['es', 'spa'],
+      fr: ['fr', 'fra', 'fre'],
+      ar: ['ar', 'ara'],
+      ti: ['ti', 'tir'],
+    };
+
+    const usableVoices = voices.filter((v) => !this.failedVoiceURIs.has(v.voiceURI));
+    const pool = usableVoices.length > 0 ? usableVoices : voices;
+
+    // Prefer dedicated single-language voices over "Multilingual" voices (which auto-switch languages mid-sentence)
+    const orderedPool = [
+      ...pool.filter((v) => !/multilingual/i.test(v.name || '')),
+      ...pool.filter((v) => /multilingual/i.test(v.name || '')),
+    ];
+
+    const normalizeTag = (raw: string) => raw.trim().toLowerCase().replace(/_/g, '-');
+    const exactList = [normalizeTag(speechLocale), ...(exactCandidates[lang] || [])];
+
+    for (const candidate of exactList) {
+      const match = orderedPool.find((v) => normalizeTag(v.lang) === candidate);
+      if (match) return { voice: match, voicesLoaded: true };
+    }
+
+    const prefixes = prefixCandidates[lang] || [lang];
+    for (const prefix of prefixes) {
+      const match = orderedPool.find((v) => {
+        const vl = normalizeTag(v.lang);
+        return vl === prefix || vl.startsWith(`${prefix}-`);
+      });
+      if (match) return { voice: match, voicesLoaded: true };
+    }
+
+    // Secondary check: match voice name ONLY if its lang tag is empty/undetermined (never override another explicit foreign language)
+    const nameHints: Record<SupportedLanguage, RegExp> = {
+      nb: /\b(norwegian|norsk|bokm[aå]l|nynorsk)\b/i,
+      en: /\b(english)\b/i,
+      sv: /\b(swedish|svensk|svenska)\b/i,
+      de: /\b(german|deutsch)\b/i,
+      es: /\b(spanish|espa[nñ]ol)\b/i,
+      fr: /\b(french|fran[cç]ais)\b/i,
+      ar: /\b(arabic|العربية)\b/i,
+      ti: /\b(tigrinya|ትግርኛ)\b/i,
+    };
+    const nameMatch = orderedPool.find((v) => {
+      const vl = normalizeTag(v.lang || '');
+      const isNeutralTag = !vl || vl === 'und' || vl === 'unknown';
+      return isNeutralTag && nameHints[lang].test(v.name || '');
+    });
+
+    return { voice: nameMatch || null, voicesLoaded: true };
   }
 
   private dispatchSpeech(
@@ -720,67 +789,93 @@ class SoundEngine {
     if (this.isMuted || !this.isSpeechEnabled) return;
     if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
 
-    try {
-      const synth = window.speechSynthesis;
-      if (this.speechDispatchTimer !== null) {
-        window.clearTimeout(this.speechDispatchTimer);
-        this.speechDispatchTimer = null;
-      }
-      const seq = ++this.speechSequence;
-
-      const speechLocale = this.getSpeechLocale(lang);
-      const matchedVoice = this.selectVoiceForLanguage(lang, speechLocale);
-
-      const u = new SpeechSynthesisUtterance(text);
-      u.lang = matchedVoice?.lang || speechLocale;
-      if (matchedVoice) {
-        u.voice = matchedVoice;
-      }
-      u.rate = opts?.rate ?? this.speechRate;
-      u.pitch = opts?.pitch ?? 1.04;
-      u.volume = this.speechVol * this.masterVol;
-      u.onend = () => {
-        if (this.currentUtterance === u) {
-          this.currentUtterance = null;
-        }
-      };
-      u.onerror = () => {
-        if (this.currentUtterance === u) {
-          this.currentUtterance = null;
-        }
-      };
-
-      if (synth.paused) {
-        synth.resume();
-      }
-
-      if (synth.speaking || synth.pending) {
-        // Cancel existing utterance and wait a short beat so Chromium does not drop the new utterance
-        synth.cancel();
-        this.speechDispatchTimer = window.setTimeout(() => {
-          this.speechDispatchTimer = null;
-          if (seq !== this.speechSequence || this.isMuted || !this.isSpeechEnabled) return;
-          try {
-            if (synth.paused) synth.resume();
-            this.currentUtterance = u;
-            synth.speak(u);
-          } catch {
-            // fail silent
-          }
-        }, 65);
-      } else {
-        this.currentUtterance = u;
-        synth.speak(u);
-      }
-    } catch {
-      // speech fail silent
+    const seq = ++this.speechSequence;
+    if (this.speechDispatchTimer !== null) {
+      window.clearTimeout(this.speechDispatchTimer);
+      this.speechDispatchTimer = null;
     }
+
+    const executeSpeak = () => {
+      if (seq !== this.speechSequence || this.isMuted || !this.isSpeechEnabled) return;
+      // Always re-verify the active language right before speaking
+      if (this.getActiveLanguage() !== lang) return;
+
+      try {
+        const synth = window.speechSynthesis;
+        const speechLocale = this.getSpeechLocale(lang);
+        const { voice: matchedVoice, voicesLoaded } = this.selectVoiceForLanguage(lang, speechLocale);
+
+        // STRICT GUARD: If the device has loaded voices and NONE match the selected menu language,
+        // NEVER let the browser fall back to a voice of a different language (e.g. English).
+        if (voicesLoaded && !matchedVoice) {
+          return;
+        }
+
+        const u = new SpeechSynthesisUtterance(text);
+        u.lang = matchedVoice?.lang || speechLocale;
+        if (matchedVoice) {
+          u.voice = matchedVoice;
+        }
+        u.rate = opts?.rate ?? this.speechRate;
+        u.pitch = opts?.pitch ?? 1.04;
+        u.volume = this.speechVol * this.masterVol;
+        u.onend = () => {
+          if (this.currentUtterance === u) {
+            this.currentUtterance = null;
+          }
+        };
+        u.onerror = () => {
+          if (matchedVoice?.voiceURI) {
+            this.failedVoiceURIs.add(matchedVoice.voiceURI);
+          }
+          if (this.currentUtterance === u) {
+            this.currentUtterance = null;
+          }
+        };
+
+        if (synth.paused) {
+          synth.resume();
+        }
+
+        if (synth.speaking || synth.pending) {
+          synth.cancel();
+          this.speechDispatchTimer = window.setTimeout(() => {
+            this.speechDispatchTimer = null;
+            if (seq !== this.speechSequence || this.isMuted || !this.isSpeechEnabled) return;
+            if (this.getActiveLanguage() !== lang) return;
+            try {
+              if (synth.paused) synth.resume();
+              this.currentUtterance = u;
+              synth.speak(u);
+            } catch {
+              // fail silent
+            }
+          }, 65);
+        } else {
+          this.currentUtterance = u;
+          synth.speak(u);
+        }
+      } catch {
+        // speech fail silent
+      }
+    };
+
+    const initialVoices = this.getAvailableVoices();
+    if (initialVoices.length === 0) {
+      // Wait briefly once for Chromium async voice list hydration before deciding
+      this.speechDispatchTimer = window.setTimeout(() => {
+        this.speechDispatchTimer = null;
+        executeSpeak();
+      }, 140);
+      return;
+    }
+
+    executeSpeak();
   }
 
   /**
    * Speak ball announcement strictly in the currently selected menu language.
-   * Avoids reading untranslated English affirmations when non-English languages are active
-   * and prevents double-cancel drops.
+   * Uses full localized number words + exact voice binding so drawn numbers are NEVER spoken in another language.
    */
   public speakBall(letter: string, number: number, _affirmation?: string) {
     if (this.isMuted || !this.isSpeechEnabled) return;
@@ -795,8 +890,7 @@ class SoundEngine {
     this.lastSpokenBallKey = dedupKey;
     this.lastSpokenBallAt = now;
 
-    // Pause cleanly at the comma so letter & number are never slurred together in any language
-    const spokenText = `${letter}, ${number}`;
+    const spokenText = formatBingoBallSpeech(letter, number, currentLang);
     this.dispatchSpeech(spokenText, currentLang, { rate: Math.min(this.speechRate, 1.02), pitch: 1.04 });
   }
 

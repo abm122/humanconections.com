@@ -1120,8 +1120,12 @@ export const RemoteBingoModal: React.FC<RemoteBingoModalProps> = ({
     if (!canHost) return;
     sounds.playLineComplete();
     setConfirmAction(null);
-    if (onStartNewRound) onStartNewRound();
-    const newCode = remoteBingo.startNewRound();
+    if (onStartNewRound) {
+      onStartNewRound();
+    } else {
+      remoteBingo.startNewRound();
+    }
+    const newCode = remoteBingo.getHostCode();
     if (newCode) {
       setHostCode(newCode);
       setIsCodeLocked(true);

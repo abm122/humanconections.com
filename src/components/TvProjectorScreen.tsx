@@ -683,6 +683,13 @@ export const TvProjectorScreen: React.FC<TvProjectorScreenProps> = ({
       setBingoTvState(state);
     });
 
+    const unsubNewRound = remoteBingo.onNewRound((ev) => {
+      const nextCode = (ev.roomCode || '').trim().toUpperCase();
+      if (nextCode.length >= 3 && nextCode !== connectedCode) {
+        setConnectedCode(nextCode);
+      }
+    });
+
     const unsubMode = remoteBingo.onTvModeChange((targetGame) => {
       setActiveGame(targetGame);
       if (connectedCode) {
@@ -700,10 +707,22 @@ export const TvProjectorScreen: React.FC<TvProjectorScreenProps> = ({
 
     return () => {
       unsubBingoTv();
+      unsubNewRound();
       unsubMode();
       unsubQuiz();
     };
   }, [connectedCode]);
+
+  useEffect(() => {
+    const nextRoomCode = (
+      activeGame === 'quiz' ? quizSnapshot?.roomCode : bingoTvState?.roomCode
+    )
+      ?.trim()
+      .toUpperCase();
+    if (nextRoomCode && nextRoomCode.length >= 3 && nextRoomCode !== connectedCode) {
+      setConnectedCode(nextRoomCode);
+    }
+  }, [activeGame, quizSnapshot?.roomCode, bingoTvState?.roomCode, connectedCode]);
 
   useEffect(() => {
     const cleanInit = initialCode.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');

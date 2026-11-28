@@ -38,6 +38,7 @@ const DEFAULT_GUEST_USER: AuthUser = {
 class AuthService {
   private currentUser: AuthUser;
   private listeners: Set<() => void> = new Set();
+  private loginListeners: Set<(user: AuthUser) => void> = new Set();
 
   constructor() {
     this.currentUser = this.loadSession();
@@ -78,8 +79,12 @@ class AuthService {
   }
 
   private applyOwnerUserFromProfile() {
+    const prevWasOwner = this.currentUser.isAuthenticated && this.currentUser.role === 'owner';
     this.currentUser = this.buildOwnerUser();
     this.saveSession();
+    if (!prevWasOwner) {
+      this.emitLoginEvent();
+    }
   }
 
   private loadSession(): AuthUser {
@@ -145,6 +150,16 @@ class AuthService {
     return () => this.listeners.delete(cb);
   }
 
+  public onLogin(cb: (user: AuthUser) => void): () => void {
+    this.loginListeners.add(cb);
+    return () => this.loginListeners.delete(cb);
+  }
+
+  private emitLoginEvent() {
+    const snapshot = this.getCurrentUser();
+    this.loginListeners.forEach((cb) => cb(snapshot));
+  }
+
   public getCurrentUser(): AuthUser {
     return { ...this.currentUser };
   }
@@ -182,6 +197,7 @@ class AuthService {
     ownerControl.unlockAdmin();
     sessionTimer.grantOwnerAccess();
     this.saveSession();
+    this.emitLoginEvent();
     return this.currentUser;
   }
 
@@ -205,6 +221,7 @@ class AuthService {
     ownerControl.unlockAdmin();
     sessionTimer.grantOwnerAccess();
     this.saveSession();
+    this.emitLoginEvent();
     return this.currentUser;
   }
 
@@ -222,6 +239,7 @@ class AuthService {
       lastLoginAt: Date.now(),
     };
     this.saveSession();
+    this.emitLoginEvent();
     return this.currentUser;
   }
 
@@ -239,6 +257,7 @@ class AuthService {
       lastLoginAt: Date.now(),
     };
     this.saveSession();
+    this.emitLoginEvent();
     return this.currentUser;
   }
 

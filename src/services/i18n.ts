@@ -726,6 +726,17 @@ class I18nService {
         }
       }
       this.updateDocumentDirection();
+
+      window.addEventListener('storage', (e) => {
+        if (e.key === STORAGE_KEY && e.newValue && SUPPORTED_LANGUAGES.some((l) => l.code === e.newValue)) {
+          const next = e.newValue as SupportedLanguage;
+          if (this.currentLanguage !== next) {
+            this.currentLanguage = next;
+            this.updateDocumentDirection();
+            this.notify();
+          }
+        }
+      });
     }
   }
 

@@ -290,6 +290,10 @@ const pendingMusicRoundTimers = new Map<string, ReturnType<typeof setTimeout>>()
 const processedClaimIds = new Map<string, number>();
 const bingoRemoteProgressByRoom = new Map<string, Map<string, BingoTvPlayerSummary>>();
 const activeTvGameByCode = new Map<string, 'quiz' | 'bingo'>();
+const migratedRoundRedirects = new Map<
+  string,
+  { newCode: string; roundNumber: number; winnerName?: string; reason: 'fullbrett' | 'host'; timestamp: number }
+>();
 const lastFirestoreSyncByCode = new Map<string, number>();
 
 function recordProcessedClaimId(claimId: string): boolean {
@@ -724,17 +728,115 @@ function broadcastBingoTvState(roomId: string, entry: BingoHostRoomEntry) {
   }
 }
 
+function generateFreshUniqueRoomCode(excludeCode?: string): string {
+  const cleanExclude = cleanRoomCode(excludeCode || '');
+  for (let i = 0; i < 40; i++) {
+    const candidate = Math.floor(1000 + Math.random() * 9000).toString();
+    if (
+      candidate !== cleanExclude &&
+      !bingoHostRooms.has(`joy-bingo-${candidate}`) &&
+      !musicBingoRooms.has(candidate) &&
+      !quizRooms.get(`joy-quiz-${candidate}`)?.isHostActive
+    ) {
+      return candidate;
+    }
+  }
+  return Math.floor(1000 + Math.random() * 9000).toString();
+}
+
+function rotateArrangementRoomCode(oldCode: string, requestedNewCode?: string): string {
+  const prevCode = cleanRoomCode(oldCode);
+  const candidate = cleanRoomCode(requestedNewCode || '');
+  const nextCode =
+    candidate.length >= 3 && candidate !== prevCode
+      ? candidate
+      : generateFreshUniqueRoomCode(prevCode);
+  if (!prevCode || prevCode === nextCode) {
+    return nextCode;
+  }
+
+  const oldBingoRoomId = `joy-bingo-${prevCode}`;
+  const newBingoRoomId = `joy-bingo-${nextCode}`;
+  const oldQuizRoomId = `joy-quiz-${prevCode}`;
+  const newQuizRoomId = `joy-quiz-${nextCode}`;
+
+  const bEntry = bingoHostRooms.get(oldBingoRoomId);
+  if (bEntry) {
+    bingoHostRooms.delete(oldBingoRoomId);
+    bEntry.roomCode = nextCode;
+    bEntry.roomId = newBingoRoomId;
+    bingoHostRooms.set(newBingoRoomId, bEntry);
+  }
+
+  const pendingBingoTimer = pendingBingoRoundTimers.get(oldBingoRoomId);
+  if (pendingBingoTimer) {
+    clearTimeout(pendingBingoTimer);
+    pendingBingoRoundTimers.delete(oldBingoRoomId);
+  }
+
+  const progMap = bingoRemoteProgressByRoom.get(oldBingoRoomId);
+  if (progMap) {
+    bingoRemoteProgressByRoom.delete(oldBingoRoomId);
+    bingoRemoteProgressByRoom.set(newBingoRoomId, progMap);
+  }
+
+  const mRoom = musicBingoRooms.get(prevCode);
+  if (mRoom) {
+    musicBingoRooms.delete(prevCode);
+    mRoom.roomCode = nextCode;
+    musicBingoRooms.set(nextCode, mRoom);
+  }
+
+  const pendingMusicTimer = pendingMusicRoundTimers.get(prevCode);
+  if (pendingMusicTimer) {
+    clearTimeout(pendingMusicTimer);
+    pendingMusicRoundTimers.delete(prevCode);
+  }
+
+  const qRoom = quizRooms.get(oldQuizRoomId);
+  if (qRoom) {
+    quizRooms.delete(oldQuizRoomId);
+    qRoom.roomCode = nextCode;
+    qRoom.roomId = newQuizRoomId;
+    quizRooms.set(newQuizRoomId, qRoom);
+  }
+
+  const tvPref = activeTvGameByCode.get(prevCode);
+  if (tvPref) {
+    activeTvGameByCode.delete(prevCode);
+    activeTvGameByCode.set(nextCode, tvPref);
+  }
+
+  for (const [, client] of clients.entries()) {
+    if (client.roomId === oldBingoRoomId) {
+      client.roomId = newBingoRoomId;
+    } else if (client.roomId === oldQuizRoomId) {
+      client.roomId = newQuizRoomId;
+    }
+    if (client.hostedBingoRoomId === oldBingoRoomId) {
+      client.hostedBingoRoomId = newBingoRoomId;
+    }
+    if (client.tvWatchCode === prevCode) {
+      client.tvWatchCode = nextCode;
+    }
+  }
+
+  return nextCode;
+}
+
 function executeBingoNewRound(
   roomId: string,
   entry: BingoHostRoomEntry,
   winnerName?: string,
-  reason: 'fullbrett' | 'host' = 'fullbrett'
-) {
+  reason: 'fullbrett' | 'host' = 'fullbrett',
+  requestedNewCode?: string
+): string {
   const pendingTimer = pendingBingoRoundTimers.get(roomId);
   if (pendingTimer) {
     clearTimeout(pendingTimer);
     pendingBingoRoundTimers.delete(roomId);
   }
+  const prevCode = entry.roomCode;
   entry.roundNumber = (entry.roundNumber || 1) + 1;
   entry.calledBalls = [];
   entry.lastClaim = null;
@@ -751,10 +853,25 @@ function executeBingoNewRound(
       progMap.set(uid, { ...prog, linesCompleted: 0, hasBingo: false });
     }
   }
-  broadcastToRoom(roomId, {
+
+  const nextCode = rotateArrangementRoomCode(prevCode, requestedNewCode);
+  const nextRoomId = `joy-bingo-${nextCode}`;
+  if (prevCode && prevCode !== nextCode) {
+    migratedRoundRedirects.set(prevCode, {
+      newCode: nextCode,
+      roundNumber: entry.roundNumber,
+      winnerName,
+      reason,
+      timestamp: Date.now(),
+    });
+  }
+
+  broadcastToRoom(nextRoomId, {
     type: 'bingo:new_round',
     payload: {
-      roomCode: entry.roomCode,
+      roomCode: nextCode,
+      oldRoomCode: prevCode,
+      newRoomCode: nextCode,
       roundNumber: entry.roundNumber,
       winnerName: winnerName || '',
       reason,
@@ -763,21 +880,23 @@ function executeBingoNewRound(
       timestamp: Date.now(),
     },
   });
-  broadcastBingoTvState(roomId, entry);
+  broadcastBingoTvState(nextRoomId, entry);
   scheduleSaveActiveRooms();
+  return nextCode;
 }
 
 function executeMusicNewRound(
   rawCode: string,
   mRoom: MusicBingoRoomState,
   winnerName?: string,
-  reason: 'fullbrett' | 'host' = 'fullbrett'
-) {
-  const code = cleanRoomCode(rawCode);
-  const pendingTimer = pendingMusicRoundTimers.get(code);
+  reason: 'fullbrett' | 'host' = 'fullbrett',
+  requestedNewCode?: string
+): string {
+  const prevCode = cleanRoomCode(rawCode);
+  const pendingTimer = pendingMusicRoundTimers.get(prevCode);
   if (pendingTimer) {
     clearTimeout(pendingTimer);
-    pendingMusicRoundTimers.delete(code);
+    pendingMusicRoundTimers.delete(prevCode);
   }
   mRoom.roundNumber = (mRoom.roundNumber || 1) + 1;
   mRoom.playedSongIds = [];
@@ -790,12 +909,26 @@ function executeMusicNewRound(
   for (const [uid, prog] of mRoom.participants.entries()) {
     mRoom.participants.set(uid, { ...prog, markedCount: 0, linesCompleted: 0, hasBingo: false });
   }
-  const bingoRoomId = `joy-bingo-${code}`;
-  const quizRoomId = `joy-quiz-${code}`;
+
+  const nextCode = rotateArrangementRoomCode(prevCode, requestedNewCode);
+  if (prevCode && prevCode !== nextCode) {
+    migratedRoundRedirects.set(prevCode, {
+      newCode: nextCode,
+      roundNumber: mRoom.roundNumber,
+      winnerName,
+      reason,
+      timestamp: Date.now(),
+    });
+  }
+
+  const bingoRoomId = `joy-bingo-${nextCode}`;
+  const quizRoomId = `joy-quiz-${nextCode}`;
   const newRoundMsg = JSON.stringify({
     type: 'music:new_round',
     payload: {
-      roomCode: code,
+      roomCode: nextCode,
+      oldRoomCode: prevCode,
+      newRoomCode: nextCode,
       roundNumber: mRoom.roundNumber,
       winnerName: winnerName || '',
       reason,
@@ -807,12 +940,13 @@ function executeMusicNewRound(
   for (const [clientWs, client] of clients.entries()) {
     if (
       clientWs.readyState === WebSocket.OPEN &&
-      (isClientInRoom(client, bingoRoomId) || isClientInRoom(client, quizRoomId) || client.tvWatchCode === code)
+      (isClientInRoom(client, bingoRoomId) || isClientInRoom(client, quizRoomId) || client.tvWatchCode === nextCode)
     ) {
       clientWs.send(newRoundMsg);
     }
   }
-  broadcastMusicBingoState(code, mRoom);
+  broadcastMusicBingoState(nextCode, mRoom);
+  return nextCode;
 }
 
 async function processBingoRemoteClaim(params: {
@@ -1842,7 +1976,8 @@ wss.on('connection', (ws) => {
             targetBingoRoom,
             entry,
             payload?.winnerName ? sanitizeMessage(String(payload.winnerName)).cleanText : undefined,
-            'host'
+            'host',
+            payload?.newRoomCode ? String(payload.newRoomCode) : undefined
           );
           break;
         }
@@ -2502,7 +2637,21 @@ wss.on('connection', (ws) => {
             room.teamScores[t.id] = 0;
           }
 
-          broadcastQuizState(targetQuizRoomId, room);
+          const prevQuizCode = room.roomCode;
+          const nextQuizCode = rotateArrangementRoomCode(
+            prevQuizCode,
+            payload?.newRoomCode ? String(payload.newRoomCode) : undefined
+          );
+          if (prevQuizCode && prevQuizCode !== nextQuizCode) {
+            migratedRoundRedirects.set(prevQuizCode, {
+              newCode: nextQuizCode,
+              roundNumber: 1,
+              reason: 'host',
+              timestamp: Date.now(),
+            });
+          }
+
+          broadcastQuizState(`joy-quiz-${nextQuizCode}`, room);
           break;
         }
 
@@ -2746,7 +2895,8 @@ wss.on('connection', (ws) => {
             code,
             mRoom,
             payload?.winnerName ? sanitizeMessage(String(payload.winnerName)).cleanText : undefined,
-            'host'
+            'host',
+            payload?.newRoomCode ? String(payload.newRoomCode) : undefined
           );
           break;
         }
@@ -3074,6 +3224,7 @@ app.post('/api/rooms/register', (req, res) => {
     return res.status(400).json({ success: false, error: 'Ugyldig koblingskode' });
   }
   pruneExpiredRooms();
+  migratedRoundRedirects.delete(cleanCode);
   const cleanHostName = sanitizeMessage(String(hostName || 'Arrangør')).cleanText || 'Arrangør';
   const cleanHostKey = hostKey ? String(hostKey) : undefined;
 
@@ -3171,6 +3322,13 @@ app.get('/api/rooms/validate', async (req, res) => {
   if (!cleanCode || cleanCode.length < 3) {
     return res.json({ valid: false });
   }
+  const hasActiveMemoryRoom =
+    bingoHostRooms.has(`joy-bingo-${cleanCode}`) ||
+    Boolean(quizRooms.get(`joy-quiz-${cleanCode}`)?.isHostActive) ||
+    musicBingoRooms.has(cleanCode);
+  if (migratedRoundRedirects.has(cleanCode) && !hasActiveMemoryRoom) {
+    return res.json({ valid: false });
+  }
   if (!bingoHostRooms.has(`joy-bingo-${cleanCode}`) || !quizRooms.get(`joy-quiz-${cleanCode}`)?.isHostActive) {
     await hydrateRoomFromFirestoreIfNeeded(cleanCode);
   }
@@ -3212,14 +3370,25 @@ app.get('/api/rooms/state', async (req, res) => {
     return res.json({ valid: false, calledBalls: [] });
   }
   await hydrateRoomFromFirestoreIfNeeded(cleanCode);
-  const entry = bingoHostRooms.get(`joy-bingo-${cleanCode}`);
-  const qRoom = quizRooms.get(`joy-quiz-${cleanCode}`);
-  const mRoom = musicBingoRooms.get(cleanCode);
+  let resolvedCode = cleanCode;
+  let migratedToCode: string | undefined;
+  if (!bingoHostRooms.has(`joy-bingo-${cleanCode}`) && !musicBingoRooms.has(cleanCode)) {
+    const redir = migratedRoundRedirects.get(cleanCode);
+    if (redir && Date.now() - redir.timestamp < 90000) {
+      resolvedCode = redir.newCode;
+      migratedToCode = redir.newCode;
+    }
+  }
+  const entry = bingoHostRooms.get(`joy-bingo-${resolvedCode}`);
+  const qRoom = quizRooms.get(`joy-quiz-${resolvedCode}`);
+  const mRoom = musicBingoRooms.get(resolvedCode);
   const hasBingo = Boolean(entry);
   const hasQuiz = Boolean(qRoom && qRoom.isHostActive);
   return res.json({
     valid: hasBingo || hasQuiz || Boolean(mRoom),
-    activeGame: activeTvGameByCode.get(cleanCode) || (hasBingo ? 'bingo' : hasQuiz ? 'quiz' : null),
+    roomCode: resolvedCode,
+    migratedToCode,
+    activeGame: activeTvGameByCode.get(resolvedCode) || (hasBingo ? 'bingo' : hasQuiz ? 'quiz' : null),
     hostName: entry?.hostName || qRoom?.hostName || mRoom?.hostName || 'Arrangør',
     roundNumber: entry?.roundNumber || 1,
     calledBalls: entry?.calledBalls || [],
@@ -3258,7 +3427,7 @@ app.post('/api/rooms/bingo/claim', async (req, res) => {
 });
 
 app.post('/api/rooms/bingo/new_round', (req, res) => {
-  const { roomCode, hostKey, winnerName } = req.body || {};
+  const { roomCode, hostKey, winnerName, newRoomCode } = req.body || {};
   const cleanCode = cleanRoomCode(roomCode);
   if (!cleanCode || cleanCode.length < 3) {
     return res.status(400).json({ success: false, error: 'Ugyldig romkode' });
@@ -3266,18 +3435,23 @@ app.post('/api/rooms/bingo/new_round', (req, res) => {
   const targetRoomId = `joy-bingo-${cleanCode}`;
   const entry = bingoHostRooms.get(targetRoomId);
   if (!entry) {
+    const redir = migratedRoundRedirects.get(cleanCode);
+    if (redir) {
+      return res.json({ success: true, roundNumber: redir.roundNumber, newRoomCode: redir.newCode });
+    }
     return res.status(404).json({ success: false, error: 'Fant ingen aktiv bingorunde' });
   }
   if (entry.hostKey && String(hostKey || '') !== entry.hostKey) {
     return res.status(403).json({ success: false, error: 'Kun arrangøren kan starte ny runde' });
   }
-  executeBingoNewRound(
+  const nextCode = executeBingoNewRound(
     targetRoomId,
     entry,
     winnerName ? sanitizeMessage(String(winnerName)).cleanText : undefined,
-    'host'
+    'host',
+    newRoomCode ? String(newRoomCode) : undefined
   );
-  return res.json({ success: true, roundNumber: entry.roundNumber });
+  return res.json({ success: true, roundNumber: entry.roundNumber, newRoomCode: nextCode });
 });
 
 app.post('/api/rooms/music/claim', (req, res) => {
@@ -3298,7 +3472,7 @@ app.post('/api/rooms/music/claim', (req, res) => {
 });
 
 app.post('/api/rooms/music/new_round', (req, res) => {
-  const { roomCode, hostKey, winnerName } = req.body || {};
+  const { roomCode, hostKey, winnerName, newRoomCode } = req.body || {};
   const cleanCode = cleanRoomCode(roomCode);
   if (!cleanCode || cleanCode.length < 3) {
     return res.status(400).json({ success: false, error: 'Ugyldig romkode' });
@@ -3306,19 +3480,24 @@ app.post('/api/rooms/music/new_round', (req, res) => {
   const mRoom = musicBingoRooms.get(cleanCode);
   const bingoEntry = bingoHostRooms.get(`joy-bingo-${cleanCode}`);
   if (!mRoom) {
+    const redir = migratedRoundRedirects.get(cleanCode);
+    if (redir) {
+      return res.json({ success: true, roundNumber: redir.roundNumber, newRoomCode: redir.newCode });
+    }
     return res.status(404).json({ success: false, error: 'Fant ingen aktiv Musikkbingo-runde' });
   }
   const expectedKey = mRoom.hostKey || bingoEntry?.hostKey;
   if (expectedKey && String(hostKey || '') !== expectedKey) {
     return res.status(403).json({ success: false, error: 'Kun arrangøren kan starte ny runde' });
   }
-  executeMusicNewRound(
+  const nextCode = executeMusicNewRound(
     cleanCode,
     mRoom,
     winnerName ? sanitizeMessage(String(winnerName)).cleanText : undefined,
-    'host'
+    'host',
+    newRoomCode ? String(newRoomCode) : undefined
   );
-  return res.json({ success: true, roundNumber: mRoom.roundNumber });
+  return res.json({ success: true, roundNumber: mRoom.roundNumber, newRoomCode: nextCode });
 });
 
 // =========================================================================

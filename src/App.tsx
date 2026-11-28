@@ -1863,7 +1863,7 @@ export default function App() {
     setBannedNotice(`${playerName}: ${reason || ui.bannedDesc}`);
   };
 
-  // Start a fresh Bingo round for current room (keeps room code & participants, resets balls & cards)
+  // Start a fresh Bingo round for current room (rotates to a brand-new join code, migrates connected participants & resets balls & cards)
   const handleStartNewBingoRound = () => {
     const user = authService.getCurrentUser();
     const isOwner = user.role === 'owner' || ownerControl.isUnlocked();
@@ -1878,11 +1878,12 @@ export default function App() {
     if (remoteBingo.getHostCode() || remoteBingo.getCurrentRoomCode()) {
       remoteBingo.broadcastRoundResetToRoom();
     } else {
+      remoteBingo.startNewRound();
       setBingoRoundNumber((r) => r + 1);
     }
   };
 
-  // Reset current session progress and return to Title Screen for fresh parameters
+  // Reset current session progress and return to Title Screen with a fresh code for next round
   const handleResetGame = () => {
     sounds.playPop(1.1);
     setIsAutoCalling(false);
@@ -1896,7 +1897,7 @@ export default function App() {
       )
     );
     if (!remoteBingo.getIsRemotePlayer() && remoteBingo.canActAsHost()) {
-      remoteBingo.unlockCodeForNewRound();
+      remoteBingo.startNewRound();
     }
     setRoomClaimedMilestones([]);
     setMilestoneWinners({});
@@ -3494,6 +3495,9 @@ export default function App() {
           if (isRemoteParticipant) {
             setScreen('PLAYING');
             return;
+          }
+          if (remoteBingo.canActAsHost()) {
+            remoteBingo.startNewRound();
           }
           handleStartGame(mode, theme, players.length, numCardsPerPlayer, displayMode);
         }}
